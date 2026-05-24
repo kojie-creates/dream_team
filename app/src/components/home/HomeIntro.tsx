@@ -1,4 +1,6 @@
-export function HomeIntro({ workspaceName }: { workspaceName: string }) {
+import Link from 'next/link';
+
+export function HomeIntro({ workspaceName, slug }: { workspaceName: string; slug: string }) {
   return (
     <section className="space-y-4">
       <div className="space-y-1">
@@ -12,23 +14,29 @@ export function HomeIntro({ workspaceName }: { workspaceName: string }) {
         </p>
       </div>
       <div className="flex flex-wrap gap-2">
+        <Link
+          href={`/w/${slug}/new/paste`}
+          className="rounded border border-neutral-800 bg-neutral-100 px-3 py-2 text-sm font-medium text-neutral-900 hover:bg-white"
+        >
+          Paste a brief
+        </Link>
         <button
           type="button"
           disabled
-          title="Coming next — Phase 1"
-          className="rounded border border-neutral-800 bg-neutral-100 px-3 py-2 text-sm font-medium text-neutral-900 disabled:cursor-not-allowed disabled:opacity-90"
+          title="Coming next — Phase 2"
+          className="rounded border border-neutral-700 px-3 py-2 text-sm font-medium text-neutral-200 disabled:cursor-not-allowed disabled:opacity-90"
         >
           Upload a brief
         </button>
         <button
           type="button"
           disabled
-          title="Coming next — Phase 1"
+          title="Coming next — Phase 2"
           className="rounded border border-neutral-700 px-3 py-2 text-sm font-medium text-neutral-200 disabled:cursor-not-allowed disabled:opacity-90"
         >
           Generate with chat
         </button>
-        <span className="self-center text-xs text-neutral-600">Both inputs become a ticket the same way.</span>
+        <span className="self-center text-xs text-neutral-600">All three inputs become a ticket the same way.</span>
       </div>
     </section>
   );

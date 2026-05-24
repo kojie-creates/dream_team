@@ -21,7 +21,7 @@ export default async function WorkspaceHomePage({
 
   return (
     <div className="space-y-10">
-      <HomeIntro workspaceName={workspace.name} />
+      <HomeIntro workspaceName={workspace.name} slug={workspace.slug} />
       <StarterDomains />
       <ActivitySections />
       <ConnectorsPanel />
