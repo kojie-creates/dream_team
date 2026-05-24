@@ -2,25 +2,12 @@ import Link from 'next/link';
 import { notFound } from 'next/navigation';
 import { createSupabaseServerClient } from '@/lib/supabase/server';
 import { RunOrchestratorStubButton } from '@/components/tickets/RunOrchestratorStubButton';
+import { StatusPill } from '@/components/tickets/StatusPill';
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
-const STATUS_COPY: Record<string, { label: string; tone: string }> = {
-  open: { label: 'Open', tone: 'bg-neutral-800 text-neutral-200' },
-  in_progress: { label: 'In progress', tone: 'bg-sky-950 text-sky-200' },
-  needs_input: { label: 'Needs input', tone: 'bg-amber-950 text-amber-200' },
-  done: { label: 'Done', tone: 'bg-emerald-950 text-emerald-200' },
-  failed: { label: 'Failed', tone: 'bg-red-950 text-red-200' },
-  looped: { label: 'Looped', tone: 'bg-fuchsia-950 text-fuchsia-200' },
-};
-
-function StatusPill({ status }: { status: string }) {
-  const v = STATUS_COPY[status] ?? { label: status, tone: 'bg-neutral-800 text-neutral-200' };
-  return (
-    <span className={`rounded px-2 py-0.5 text-[11px] font-medium uppercase tracking-wider ${v.tone}`}>
-      {v.label}
-    </span>
-  );
+function fmtShortDate(iso: string): string {
+  return new Date(iso).toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
 }
 
 type TraceRow = {
@@ -78,13 +65,21 @@ export default async function TicketDetailPage({
   if (!ticket) notFound();
 
   let briefText: string | null = null;
+  let briefMeta: { source: string; word_count: number; created_at: string } | null = null;
   if (ticket.brief_id) {
     const { data: brief } = await supabase
       .from('briefs')
-      .select('raw_text, source, word_count')
+      .select('raw_text, source, word_count, created_at')
       .eq('id', ticket.brief_id)
       .maybeSingle();
     briefText = brief?.raw_text ?? null;
+    if (brief) {
+      briefMeta = {
+        source: brief.source as string,
+        word_count: brief.word_count as number,
+        created_at: brief.created_at as string,
+      };
+    }
   }
 
   const preview = briefText ? briefText.slice(0, 1200) : null;
@@ -110,7 +105,14 @@ export default async function TicketDetailPage({
     <div className="mx-auto max-w-3xl space-y-8">
       <header className="space-y-2">
         <p className="text-xs uppercase tracking-wider text-neutral-500">
-          {workspace.name} · Ticket
+          <Link href={`/w/${workspace.slug}`} className="hover:text-neutral-300">
+            {workspace.name}
+          </Link>
+          {' · '}
+          <Link href={`/w/${workspace.slug}/tickets`} className="hover:text-neutral-300">
+            Tickets
+          </Link>
+          {' · '}Ticket
         </p>
         <h1 className="text-2xl font-semibold tracking-tight text-neutral-100">{ticket.title}</h1>
         <div className="flex flex-wrap items-center gap-2 text-xs text-neutral-400">
@@ -119,6 +121,12 @@ export default async function TicketDetailPage({
           {ticket.current_agent ? <span>Agent: {ticket.current_agent}</span> : null}
           <span>Opened {new Date(ticket.created_at).toLocaleString()}</span>
         </div>
+        {briefMeta ? (
+          <p className="text-[11px] text-neutral-500">
+            From brief · <span className="font-mono text-neutral-400">{briefMeta.source}</span> ·{' '}
+            {briefMeta.word_count} words · {fmtShortDate(briefMeta.created_at)}
+          </p>
+        ) : null}
       </header>
 
       {canRunStub ? (
@@ -168,7 +176,16 @@ export default async function TicketDetailPage({
                       {new Date(ev.created_at).toLocaleString()}
                     </span>
                   </div>
-                  {summary ? <p className="text-neutral-300">{summary}</p> : null}
+                  {summary ? (
+                    <p className="text-neutral-300">{summary}</p>
+                  ) : ev.payload && Object.keys(ev.payload).length > 0 ? (
+                    <details className="text-[11px] text-neutral-400">
+                      <summary className="cursor-pointer text-neutral-500 hover:text-neutral-300">payload</summary>
+                      <pre className="mt-1 overflow-x-auto rounded bg-neutral-900 p-2 font-mono text-[11px] text-neutral-300">
+                        {JSON.stringify(ev.payload, null, 2)}
+                      </pre>
+                    </details>
+                  ) : null}
                   {evPackets.length > 0 ? (
                     <ul className="space-y-1 border-t border-neutral-800 pt-1">
                       {evPackets.map((p) => (
@@ -207,12 +224,20 @@ export default async function TicketDetailPage({
         </section>
       ) : null}
 
-      <Link
-        href={`/w/${workspace.slug}`}
-        className="inline-block text-xs text-neutral-500 hover:text-neutral-300"
-      >
-        ← Back to {workspace.name}
-      </Link>
+      <div className="flex flex-wrap gap-4 text-xs text-neutral-500">
+        <Link
+          href={`/w/${workspace.slug}/tickets`}
+          className="hover:text-neutral-300"
+        >
+          ← Back to tickets
+        </Link>
+        <Link
+          href={`/w/${workspace.slug}`}
+          className="hover:text-neutral-300"
+        >
+          ← Back to {workspace.name}
+        </Link>
+      </div>
     </div>
   );
 }

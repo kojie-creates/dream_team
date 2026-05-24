@@ -1,5 +1,6 @@
 import Link from 'next/link';
 import { EmptyPanel } from './EmptyPanel';
+import { StatusPill } from '@/components/tickets/StatusPill';
 
 export type BriefRow = {
   id: string;
@@ -28,26 +29,6 @@ export type WorkflowRunRow = {
   status: string;
   started_at: string;
 };
-
-const STATUS_TONE: Record<string, string> = {
-  open: 'bg-neutral-800 text-neutral-200',
-  in_progress: 'bg-sky-950 text-sky-200',
-  needs_input: 'bg-amber-950 text-amber-200',
-  done: 'bg-emerald-950 text-emerald-200',
-  failed: 'bg-red-950 text-red-200',
-  looped: 'bg-fuchsia-950 text-fuchsia-200',
-  pending: 'bg-neutral-800 text-neutral-300',
-  running: 'bg-sky-950 text-sky-200',
-};
-
-function StatusPill({ status }: { status: string }) {
-  const tone = STATUS_TONE[status] ?? 'bg-neutral-800 text-neutral-200';
-  return (
-    <span className={`rounded px-1.5 py-0.5 text-[10px] font-medium uppercase tracking-wider ${tone}`}>
-      {status.replace('_', ' ')}
-    </span>
-  );
-}
 
 function fmtDate(iso: string): string {
   const d = new Date(iso);
@@ -99,7 +80,12 @@ function RecentTicketsPanel({ slug, tickets }: { slug: string; tickets: TicketRo
   }
   return (
     <div className="rounded-lg border border-neutral-800 bg-neutral-900/60 p-4">
-      <h3 className="text-sm font-medium text-neutral-200">Tickets</h3>
+      <header className="flex items-baseline justify-between">
+        <h3 className="text-sm font-medium text-neutral-200">Tickets</h3>
+        <Link href={`/w/${slug}/tickets`} className="text-[11px] text-neutral-500 hover:text-neutral-300">
+          View all →
+        </Link>
+      </header>
       <ul className="mt-3 space-y-2">
         {tickets.map((t) => (
           <li key={t.id}>
@@ -108,7 +94,7 @@ function RecentTicketsPanel({ slug, tickets }: { slug: string; tickets: TicketRo
               className="block rounded border border-transparent px-2 py-1.5 hover:border-neutral-800 hover:bg-neutral-900"
             >
               <div className="flex items-center gap-2">
-                <StatusPill status={t.status} />
+                <StatusPill status={t.status} size="xs" />
                 <span className="truncate text-xs text-neutral-200">{t.title}</span>
               </div>
               <div className="mt-1 flex items-center gap-2 text-[11px] text-neutral-500">
@@ -144,7 +130,7 @@ function RecentRunsPanel({ slug, runs }: { slug: string; runs: WorkflowRunRow[] 
               className="block rounded border border-transparent px-2 py-1.5 hover:border-neutral-800 hover:bg-neutral-900"
             >
               <div className="flex items-center gap-2">
-                <StatusPill status={r.status} />
+                <StatusPill status={r.status} size="xs" />
                 <span className="truncate text-xs text-neutral-200">
                   {r.ticket_title ?? r.ticket_id.slice(0, 8)}
                 </span>
