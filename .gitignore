@@ -1,0 +1,23 @@
+# Node / Next.js
+node_modules/
+.next/
+.vercel/
+
+# Env
+.env.local
+.env.*.local
+
+# Supabase local
+supabase/.branches/
+supabase/.temp/
+app/supabase/.branches/
+app/supabase/.temp/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Editor
+.idea/
+.vscode/
+*.swp
