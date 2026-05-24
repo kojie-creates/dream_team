@@ -4,6 +4,10 @@ node_modules/
 .vercel/
 
 # Env
+.env
+.env.*
+!.env.example
+!app/.env.example
 .env.local
 .env.*.local
 
