@@ -26,6 +26,11 @@ export function WorkspaceNav({ slug }: { slug: string }) {
       match: (p) => p === `${base}/agents` || p.startsWith(`${base}/agents/`),
     },
     {
+      label: 'Contracts',
+      href: `${base}/contracts`,
+      match: (p) => p === `${base}/contracts` || p.startsWith(`${base}/contracts/`),
+    },
+    {
       label: 'History',
       href: `${base}/history`,
       match: (p) => p === `${base}/history` || p.startsWith(`${base}/history/`),
