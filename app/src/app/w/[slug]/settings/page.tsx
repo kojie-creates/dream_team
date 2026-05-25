@@ -151,20 +151,21 @@ export default async function SettingsLandingPage({
             </Link>
           </li>
           <li>
-            <div
-              aria-disabled="true"
-              className="block rounded border border-neutral-800 bg-neutral-950 p-4 opacity-70"
+            <Link
+              href={`/w/${workspace.slug}/settings/connectors`}
+              className="block rounded border border-neutral-800 bg-neutral-950 p-4 hover:border-neutral-600"
             >
               <div className="flex items-center justify-between">
-                <p className="text-sm font-medium text-neutral-200">Connectors</p>
-                <span className="rounded bg-neutral-800 px-1.5 py-0.5 text-[10px] font-medium uppercase tracking-wider text-neutral-400">
+                <p className="text-sm font-medium text-neutral-100">Connectors</p>
+                <span className="rounded bg-neutral-800 px-1.5 py-0.5 text-[10px] font-medium uppercase tracking-wider text-neutral-300">
                   Phase 5
                 </span>
               </div>
               <p className="mt-1 text-xs text-neutral-500">
-                Drive, Slack, and friends. No OAuth wired yet.
+                Google Calendar, Drive, Gmail, Sheets, Slack, Notion. Status and scopes only —
+                no OAuth wired yet.
               </p>
-            </div>
+            </Link>
           </li>
         </ul>
       </section>

@@ -195,6 +195,41 @@ for (const rel of t4FailureTargets) {
   );
 }
 
+// Phase 5 T2 honest-copy: the Connectors settings page must declare the
+// server-side-only token boundary and must not imply any provider is live.
+{
+  const rel = 'src/app/w/[slug]/settings/connectors/page.tsx';
+  const abs = path.join(root, rel);
+  const src = readFileSync(abs, 'utf8');
+  const hasBoundary = /tokens are stored server-side only/i.test(src);
+  check(
+    `connectors page declares server-side-only token boundary in ${rel}`,
+    hasBoundary,
+    'expected the literal phrase "Tokens are stored server-side only" in rendered text',
+  );
+  const hasReadOnly = /phase 5 starts read-only/i.test(src);
+  check(
+    `connectors page declares Phase 5 read-only posture in ${rel}`,
+    hasReadOnly,
+    'expected the literal phrase "Phase 5 starts read-only" in rendered text',
+  );
+}
+
+// Phase 5 T2 honest-copy: the connector catalog must keep every non-Calendar
+// provider on the "planned-later" track. Marking another provider as
+// "planned-t3" would imply it is being wired now, which it is not.
+{
+  const rel = 'src/lib/connectors/catalog.ts';
+  const abs = path.join(root, rel);
+  const src = readFileSync(abs, 'utf8');
+  const t3Hits = src.match(/phase:\s*'planned-t3'/g) ?? [];
+  check(
+    `exactly one provider entry is marked planned-t3 in ${rel}`,
+    t3Hits.length === 1,
+    `expected 1 entry with phase: 'planned-t3' (Google Calendar only); found ${t3Hits.length}`,
+  );
+}
+
 let failed = 0;
 for (const c of checks) {
   if (c.ok) {
