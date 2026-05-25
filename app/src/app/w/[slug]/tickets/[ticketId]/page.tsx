@@ -2,7 +2,11 @@ import Link from 'next/link';
 import { notFound } from 'next/navigation';
 import { createSupabaseServerClient } from '@/lib/supabase/server';
 import { RunOrchestratorStubButton } from '@/components/tickets/RunOrchestratorStubButton';
+import { RunSpecialistPassButton } from '@/components/tickets/RunSpecialistPassButton';
+import { RunQaTruthReviewButton } from '@/components/tickets/RunQaTruthReviewButton';
 import { StatusPill } from '@/components/tickets/StatusPill';
+import { TicketProgressStrip } from '@/components/tickets/TicketProgressStrip';
+import { TicketAutoRefresh } from '@/components/tickets/TicketAutoRefresh';
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
@@ -25,6 +29,15 @@ type PacketRow = {
   trace_event_id: number | null;
   packet_type: string;
   body_parsed: Record<string, unknown> | null;
+  body_raw: string | null;
+  created_at: string;
+};
+
+type ArtifactRow = {
+  id: string;
+  kind: string;
+  mime_type: string | null;
+  bytes: number | null;
   created_at: string;
 };
 
@@ -94,12 +107,50 @@ export default async function TicketDetailPage({
 
   const { data: packetData } = await supabase
     .from('packets')
-    .select('id, trace_event_id, packet_type, body_parsed, created_at')
+    .select('id, trace_event_id, packet_type, body_parsed, body_raw, created_at')
     .eq('ticket_id', ticket.id)
     .order('created_at', { ascending: true });
   const packets: PacketRow[] = (packetData ?? []) as PacketRow[];
 
+  const { data: artifactData } = await supabase
+    .from('artifacts')
+    .select('id, kind, mime_type, bytes, created_at')
+    .eq('ticket_id', ticket.id)
+    .order('created_at', { ascending: true });
+  const artifacts: ArtifactRow[] = (artifactData ?? []) as ArtifactRow[];
+
+  const hasClassifiedEvent = traceEvents.some((e) => e.event_type === 'orchestrator.classified');
+  const hasCoordinatorEvent = traceEvents.some((e) => e.event_type === 'coordinator.routed');
+  const hasSpecialistEvent = traceEvents.some((e) => e.event_type === 'specialist.artifact.created');
+  const hasQaEvent = traceEvents.some((e) => e.event_type === 'qa.validated');
+  const hasTruthEvent = traceEvents.some((e) => e.event_type === 'truth.verdict.recorded');
+
+  const lastEventIso =
+    traceEvents.length > 0 ? traceEvents[traceEvents.length - 1]!.created_at : null;
+  const lastArtifactIso =
+    artifacts.length > 0 ? artifacts[artifacts.length - 1]!.created_at : null;
+  const lastUpdatedIso = [lastEventIso, lastArtifactIso, ticket.created_at]
+    .filter((x): x is string => typeof x === 'string')
+    .sort()
+    .pop() ?? null;
+  const chainComplete = hasTruthEvent && hasQaEvent && hasSpecialistEvent;
+  const shouldPoll = !chainComplete;
   const canRunStub = ticket.status === 'open';
+  const canRunSpecialistPass =
+    ticket.status === 'in_progress' && hasClassifiedEvent && artifacts.length === 0;
+  const canRunQaTruth =
+    (ticket.status === 'in_progress' || ticket.status === 'done') &&
+    hasSpecialistEvent &&
+    artifacts.length > 0 &&
+    !(hasQaEvent && hasTruthEvent);
+
+  const artifactPackets = packets.filter((p) => p.packet_type === 'artifact');
+  const qaPackets = packets.filter(
+    (p) =>
+      p.packet_type === 'trace' &&
+      (p.body_parsed as Record<string, unknown> | null)?.packet_kind === 'qa',
+  );
+  const truthPackets = packets.filter((p) => p.packet_type === 'truth');
 
   return (
     <div className="mx-auto max-w-3xl space-y-8">
@@ -129,10 +180,38 @@ export default async function TicketDetailPage({
         ) : null}
       </header>
 
+      <TicketProgressStrip
+        input={{
+          hasBrief: briefText !== null && briefText.length > 0,
+          hasClassifiedEvent,
+          hasCoordinatorEvent,
+          hasSpecialistEvent,
+          hasArtifact: artifacts.length > 0,
+          hasQaEvent,
+          hasTruthEvent,
+        }}
+      />
+
+      <TicketAutoRefresh polling={shouldPoll} lastUpdatedIso={lastUpdatedIso} />
+
       {canRunStub ? (
         <section className="space-y-2 rounded border border-neutral-800 bg-neutral-950 p-4">
-          <h2 className="text-sm font-medium text-neutral-200">Orchestrator (Phase 1 stub)</h2>
+          <h2 className="text-sm font-medium text-neutral-200">Orchestrator</h2>
           <RunOrchestratorStubButton slug={workspace.slug} ticketId={ticket.id} />
+        </section>
+      ) : null}
+
+      {canRunSpecialistPass ? (
+        <section className="space-y-2 rounded border border-neutral-800 bg-neutral-950 p-4">
+          <h2 className="text-sm font-medium text-neutral-200">Coordinator + Specialist</h2>
+          <RunSpecialistPassButton slug={workspace.slug} ticketId={ticket.id} />
+        </section>
+      ) : null}
+
+      {canRunQaTruth ? (
+        <section className="space-y-2 rounded border border-neutral-800 bg-neutral-950 p-4">
+          <h2 className="text-sm font-medium text-neutral-200">QA + Truth Review</h2>
+          <RunQaTruthReviewButton slug={workspace.slug} ticketId={ticket.id} />
         </section>
       ) : null}
 
@@ -154,7 +233,7 @@ export default async function TicketDetailPage({
         <h2 className="text-sm font-medium text-neutral-200">Trace</h2>
         {traceEvents.length === 0 ? (
           <p className="rounded border border-dashed border-neutral-800 bg-neutral-950 p-4 text-xs text-neutral-500">
-            Trace events will appear after the Orchestrator runs. Not wired up yet in Phase 1.
+            Trace events will appear after the Orchestrator runs.
           </p>
         ) : (
           <ol className="space-y-2">
@@ -204,6 +283,152 @@ export default async function TicketDetailPage({
           </ol>
         )}
       </section>
+
+      {artifacts.length > 0 ? (
+        <section className="space-y-2">
+          <h2 className="text-sm font-medium text-neutral-200">Artifacts</h2>
+          <p className="text-[11px] text-neutral-500">
+            Artifact body is the linked packet content stored in the database. No external file is uploaded
+            or downloaded; there is nothing to download.
+          </p>
+          <ul className="space-y-2">
+            {artifacts.map((a) => {
+              const linkedPacket = artifactPackets.find(
+                (p) => (p.body_parsed as Record<string, unknown> | null)?.artifact_id === a.id,
+              );
+              const parsed = (linkedPacket?.body_parsed ?? null) as Record<string, unknown> | null;
+              const title = typeof parsed?.title === 'string' ? parsed.title : null;
+              const markdown =
+                typeof parsed?.markdown === 'string'
+                  ? parsed.markdown
+                  : linkedPacket?.body_raw ?? null;
+              const lineCount = markdown ? markdown.split(/\r?\n/).length : 0;
+              return (
+                <li
+                  key={a.id}
+                  className="space-y-2 rounded border border-neutral-800 bg-neutral-950 p-3 text-xs text-neutral-300"
+                >
+                  <div className="flex flex-wrap items-center gap-2 text-[11px] text-neutral-400">
+                    <span className="rounded bg-neutral-800 px-1.5 py-0.5 font-mono text-neutral-200">
+                      kind: {a.kind}
+                    </span>
+                    {a.mime_type ? (
+                      <span className="font-mono">type: {a.mime_type}</span>
+                    ) : null}
+                    {a.bytes != null ? <span>{a.bytes.toLocaleString()} bytes</span> : null}
+                    {markdown ? <span>{lineCount} lines</span> : null}
+                    <span className="ml-auto text-neutral-500">
+                      created {new Date(a.created_at).toLocaleString()}
+                    </span>
+                  </div>
+                  {title ? <p className="font-medium text-neutral-200">{title}</p> : null}
+                  {markdown ? (
+                    <pre className="max-h-96 overflow-auto whitespace-pre-wrap rounded bg-neutral-900 p-2 font-mono text-[11px] leading-relaxed text-neutral-200">
+                      {markdown}
+                    </pre>
+                  ) : (
+                    <p className="text-[11px] text-neutral-500">
+                      No body packet linked. Artifact metadata only.
+                    </p>
+                  )}
+                </li>
+              );
+            })}
+          </ul>
+        </section>
+      ) : null}
+
+      {qaPackets.length > 0 ? (
+        <section className="space-y-2">
+          <h2 className="text-sm font-medium text-neutral-200">QA evidence</h2>
+          <ul className="space-y-2">
+            {qaPackets.map((p) => {
+              const parsed = (p.body_parsed ?? {}) as Record<string, unknown>;
+              const result = typeof parsed.result === 'string' ? parsed.result : '—';
+              const checks = (parsed.checks ?? {}) as Record<string, boolean>;
+              return (
+                <li
+                  key={p.id}
+                  className="space-y-2 rounded border border-neutral-800 bg-neutral-950 p-3 text-xs text-neutral-300"
+                >
+                  <div className="flex flex-wrap items-center gap-2 text-[11px] text-neutral-400">
+                    <span className="rounded bg-neutral-800 px-1.5 py-0.5 font-mono text-neutral-200">
+                      qa-agent
+                    </span>
+                    <span>result: {result}</span>
+                    <span>external_attestation: false</span>
+                    <span className="ml-auto text-neutral-500">
+                      {new Date(p.created_at).toLocaleString()}
+                    </span>
+                  </div>
+                  <ul className="grid grid-cols-1 gap-1 text-[11px] text-neutral-400 sm:grid-cols-2">
+                    {Object.entries(checks).map(([k, v]) => (
+                      <li key={k} className="font-mono">
+                        {v ? '✓' : '✗'} {k}
+                      </li>
+                    ))}
+                  </ul>
+                  {p.body_raw ? (
+                    <details className="text-[11px] text-neutral-400">
+                      <summary className="cursor-pointer text-neutral-500 hover:text-neutral-300">
+                        packet body
+                      </summary>
+                      <pre className="mt-1 overflow-x-auto rounded bg-neutral-900 p-2 font-mono text-[11px] text-neutral-300">
+                        {p.body_raw}
+                      </pre>
+                    </details>
+                  ) : null}
+                </li>
+              );
+            })}
+          </ul>
+        </section>
+      ) : null}
+
+      {truthPackets.length > 0 ? (
+        <section className="space-y-2">
+          <h2 className="text-sm font-medium text-neutral-200">Truth evidence</h2>
+          <ul className="space-y-2">
+            {truthPackets.map((p) => {
+              const parsed = (p.body_parsed ?? {}) as Record<string, unknown>;
+              const verdict = typeof parsed.verdict === 'string' ? parsed.verdict : '—';
+              const rationale = typeof parsed.rationale === 'string' ? parsed.rationale : null;
+              const limits = typeof parsed.limits === 'string' ? parsed.limits : null;
+              return (
+                <li
+                  key={p.id}
+                  className="space-y-2 rounded border border-neutral-800 bg-neutral-950 p-3 text-xs text-neutral-300"
+                >
+                  <div className="flex flex-wrap items-center gap-2 text-[11px] text-neutral-400">
+                    <span className="rounded bg-neutral-800 px-1.5 py-0.5 font-mono text-neutral-200">
+                      truth-agent
+                    </span>
+                    <span>verdict: {verdict}</span>
+                    <span>external_attestation: false</span>
+                    <span className="ml-auto text-neutral-500">
+                      {new Date(p.created_at).toLocaleString()}
+                    </span>
+                  </div>
+                  {rationale ? <p className="text-neutral-300">{rationale}</p> : null}
+                  {limits ? (
+                    <p className="text-[11px] text-neutral-500">Limits: {limits}</p>
+                  ) : null}
+                  {p.body_raw ? (
+                    <details className="text-[11px] text-neutral-400">
+                      <summary className="cursor-pointer text-neutral-500 hover:text-neutral-300">
+                        packet body
+                      </summary>
+                      <pre className="mt-1 overflow-x-auto rounded bg-neutral-900 p-2 font-mono text-[11px] text-neutral-300">
+                        {p.body_raw}
+                      </pre>
+                    </details>
+                  ) : null}
+                </li>
+              );
+            })}
+          </ul>
+        </section>
+      ) : null}
 
       {packets.some((p) => p.trace_event_id === null) ? (
         <section className="space-y-2">

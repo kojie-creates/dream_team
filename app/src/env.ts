@@ -6,6 +6,12 @@ const serverSchema = z.object({
   SUPABASE_SERVICE_ROLE_KEY: z.string().min(1),
   SUPABASE_JWT_SECRET: z.string().min(1),
   NEXT_PUBLIC_SITE_URL: z.string().url().default('http://localhost:3000'),
+  // Model provider — Phase 2. Optional in dry mode; required when MODEL_PROVIDER_MODE=anthropic.
+  MODEL_PROVIDER_MODE: z.enum(['dry', 'anthropic']).default('dry'),
+  ANTHROPIC_API_KEY: z.string().min(1).optional(),
+  ANTHROPIC_CLASSIFY_MODEL: z.string().min(1).default('claude-haiku-4-5'),
+  // OpenAI key reserved for future provider parity. Not wired in Phase 2.
+  OPENAI_API_KEY: z.string().min(1).optional(),
 });
 
 const clientSchema = z.object({

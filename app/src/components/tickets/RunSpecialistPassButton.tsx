@@ -3,7 +3,7 @@
 import { useActionState } from 'react';
 import { useFormStatus } from 'react-dom';
 import {
-  runOrchestratorClassification,
+  runCoordinatorSpecialistPass,
   type OrchestratorRunState,
 } from '@/app/actions/orchestration';
 
@@ -17,26 +17,26 @@ function Submit() {
       disabled={pending}
       className="rounded bg-neutral-100 px-3 py-1.5 text-xs font-medium text-neutral-900 hover:bg-white disabled:cursor-not-allowed disabled:opacity-60"
     >
-      {pending ? 'Classifying…' : 'Run Orchestrator'}
+      {pending ? 'Running specialist…' : 'Run Specialist Pass'}
     </button>
   );
 }
 
-export function RunOrchestratorStubButton({
+export function RunSpecialistPassButton({
   slug,
   ticketId,
 }: {
   slug: string;
   ticketId: string;
 }) {
-  const [state, formAction] = useActionState(runOrchestratorClassification, INITIAL);
+  const [state, formAction] = useActionState(runCoordinatorSpecialistPass, INITIAL);
   return (
     <form action={formAction} className="flex flex-wrap items-center gap-3">
       <input type="hidden" name="slug" value={slug} />
       <input type="hidden" name="ticketId" value={ticketId} />
       <Submit />
       <span className="text-[11px] text-neutral-500">
-        Classifies the brief into a layer. Writes one workflow_run, trace_event, and handoff packet.
+        Routes through Coordinator and Specialist. Writes a markdown artifact and marks the ticket done.
       </span>
       {state.error ? (
         <span className="text-[11px] text-red-400">{state.error}</span>

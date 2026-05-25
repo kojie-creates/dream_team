@@ -11,7 +11,9 @@
     "typecheck": "tsc --noEmit",
     "format": "prettier --write .",
     "format:check": "prettier --check .",
-    "verify:supabase-project": "node scripts/verify-supabase-project.mjs"
+    "verify:supabase-project": "node scripts/verify-supabase-project.mjs",
+    "model:smoke": "node scripts/model-smoke.mjs",
+    "copy:smoke": "node scripts/copy-smoke.mjs"
   },
   "dependencies": {
     "@supabase/ssr": "^0.10.3",

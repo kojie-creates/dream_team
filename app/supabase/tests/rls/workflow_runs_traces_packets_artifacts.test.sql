@@ -5,7 +5,7 @@
 
 create extension if not exists pgtap with schema public;
 begin;
-select plan(15);
+select plan(17);
 
 create or replace function pg_temp.mk_user(p_email text) returns uuid as $$
 declare v_id uuid := gen_random_uuid();
@@ -162,7 +162,37 @@ select is(
   'trace_events row still present after blocked delete'
 );
 
--- 15. (ticket_id, seq) uniqueness on trace_events enforced (as postgres, bypass RLS).
+-- 15. Authenticated direct insert into workflow_runs denied (member B, own workspace).
+select pg_temp.act_as(current_setting('test.uid_b')::uuid);
+set local role authenticated;
+select throws_ok(
+  format(
+    $q$ insert into public.workflow_runs (workspace_id, ticket_id, run_kind, agent_id)
+        values (%L::uuid, %L::uuid, 'orchestrator', 'sneak') $q$,
+    current_setting('test.ws_a'), current_setting('test.ticket')
+  ),
+  '42501',
+  null,
+  'authenticated direct insert into workflow_runs denied'
+);
+reset role;
+
+-- 16. Authenticated direct insert into packets denied (member B, own workspace).
+select pg_temp.act_as(current_setting('test.uid_b')::uuid);
+set local role authenticated;
+select throws_ok(
+  format(
+    $q$ insert into public.packets (workspace_id, ticket_id, packet_type, body_raw)
+        values (%L::uuid, %L::uuid, 'handoff', 'sneak') $q$,
+    current_setting('test.ws_a'), current_setting('test.ticket')
+  ),
+  '42501',
+  null,
+  'authenticated direct insert into packets denied'
+);
+reset role;
+
+-- 17. (ticket_id, seq) uniqueness on trace_events enforced (as postgres, bypass RLS).
 select throws_ok(
   format(
     $q$ insert into public.trace_events (workspace_id, ticket_id, seq, event_type)
