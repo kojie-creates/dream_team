@@ -6,7 +6,7 @@ export default function AuthLayout({ children }: { children: ReactNode }) {
       <div className="w-full max-w-sm rounded-lg border border-neutral-800 bg-neutral-900 p-6 shadow-lg">
         <div className="mb-6 text-center">
           <h1 className="text-lg font-semibold tracking-tight">Dream Team</h1>
-          <p className="text-xs text-neutral-400">v1 dashboard — Phase 0</p>
+          <p className="text-xs text-neutral-400">Agentic OS Dashboard</p>
         </div>
         {children}
       </div>
