@@ -7,6 +7,7 @@ import { RunQaTruthReviewButton } from '@/components/tickets/RunQaTruthReviewBut
 import { StatusPill } from '@/components/tickets/StatusPill';
 import { TicketProgressStrip } from '@/components/tickets/TicketProgressStrip';
 import { TicketAutoRefresh } from '@/components/tickets/TicketAutoRefresh';
+import { FailureEvidencePanel } from '@/components/tickets/FailureEvidencePanel';
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
@@ -71,7 +72,7 @@ export default async function TicketDetailPage({
 
   const { data: ticket } = await supabase
     .from('tickets')
-    .select('id, title, status, layer, current_agent, created_at, brief_id')
+    .select('id, title, status, layer, current_agent, failure_type, created_at, brief_id')
     .eq('id', ticketId)
     .eq('workspace_id', workspace.id)
     .maybeSingle();
@@ -151,6 +152,10 @@ export default async function TicketDetailPage({
       (p.body_parsed as Record<string, unknown> | null)?.packet_kind === 'qa',
   );
   const truthPackets = packets.filter((p) => p.packet_type === 'truth');
+  const failurePackets = packets.filter((p) => p.packet_type === 'failure');
+  const rejectedTruthPackets = truthPackets.filter(
+    (p) => (p.body_parsed as Record<string, unknown> | null)?.verdict === 'rejected_internal',
+  );
 
   return (
     <div className="mx-auto max-w-3xl space-y-8">
@@ -168,6 +173,11 @@ export default async function TicketDetailPage({
         <h1 className="text-2xl font-semibold tracking-tight text-neutral-100">{ticket.title}</h1>
         <div className="flex flex-wrap items-center gap-2 text-xs text-neutral-400">
           <StatusPill status={ticket.status} />
+          {ticket.failure_type ? (
+            <span className="rounded bg-amber-900/40 px-1.5 py-0.5 font-mono text-[11px] text-amber-200">
+              failure_type: {ticket.failure_type}
+            </span>
+          ) : null}
           {ticket.layer ? <span>Layer: {ticket.layer}</span> : null}
           {ticket.current_agent ? <span>Agent: {ticket.current_agent}</span> : null}
           <span>Opened {new Date(ticket.created_at).toLocaleString()}</span>
@@ -179,6 +189,30 @@ export default async function TicketDetailPage({
           </p>
         ) : null}
       </header>
+
+      <FailureEvidencePanel
+        ticketStatus={ticket.status as string}
+        ticketFailureType={(ticket.failure_type as string | null) ?? null}
+        failurePackets={failurePackets.map((p) => ({
+          id: p.id,
+          trace_event_id: p.trace_event_id,
+          body_parsed: p.body_parsed,
+          body_raw: p.body_raw,
+          created_at: p.created_at,
+        }))}
+        rejectedTruthPackets={rejectedTruthPackets.map((p) => ({
+          id: p.id,
+          trace_event_id: p.trace_event_id,
+          body_parsed: p.body_parsed,
+          body_raw: p.body_raw,
+          created_at: p.created_at,
+        }))}
+        traceEvents={traceEvents.map((e) => ({
+          id: e.id,
+          seq: e.seq,
+          event_type: e.event_type,
+        }))}
+      />
 
       <TicketProgressStrip
         input={{

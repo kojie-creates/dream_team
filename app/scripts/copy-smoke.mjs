@@ -136,6 +136,43 @@ for (const rel of t6Targets) {
   );
 }
 
+// Phase 4 T1 honest-copy: failure UI must not promise retry/resolve/reroute
+// actions before those actions exist. The failure packet body_parsed may
+// contain a `recovery_suggestion: retry` value rendered as data — that is a
+// label of recorded evidence, not a UI promise — so we forbid action-style
+// phrasings only (button, link, "click to", "available"), not the bare word.
+const t4FailureTargets = [
+  'src/app/w/[slug]/tickets/[ticketId]/page.tsx',
+  'src/components/tickets/FailureEvidencePanel.tsx',
+];
+const failureActionPattern =
+  /\b(retry|resolve|reroute|rerun)\s+(button|link|action|available|now)\b|\bclick\s+to\s+(retry|resolve|reroute|rerun)\b/i;
+for (const rel of t4FailureTargets) {
+  const abs = path.join(root, rel);
+  const src = readFileSync(abs, 'utf8');
+  const hit = src.match(failureActionPattern);
+  check(
+    `no promised retry/resolve action in ${rel}`,
+    hit === null,
+    `found "${hit?.[0]}" at offset ${hit?.index}`,
+  );
+}
+
+// Phase 4 T1 honest-copy: FailureEvidencePanel must carry the explicit
+// "no recovery action is wired yet" caveat so the read-only nature of the
+// surface is stated to the operator.
+{
+  const rel = 'src/components/tickets/FailureEvidencePanel.tsx';
+  const abs = path.join(root, rel);
+  const src = readFileSync(abs, 'utf8');
+  const ok = /no recovery action is wired yet/i.test(src);
+  check(
+    `failure panel states "no recovery action is wired yet" in ${rel}`,
+    ok,
+    'expected the literal phrase to appear in rendered text',
+  );
+}
+
 let failed = 0;
 for (const c of checks) {
   if (c.ok) {
