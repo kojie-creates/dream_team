@@ -15,6 +15,7 @@ const targets = [
   'src/components/tickets/RunOrchestratorStubButton.tsx',
   'src/components/tickets/RunSpecialistPassButton.tsx',
   'src/components/tickets/RunQaTruthReviewButton.tsx',
+  'src/components/tickets/InjectControlledFailureButton.tsx',
   'src/components/tickets/TicketProgressStrip.tsx',
   'src/components/tickets/TicketAutoRefresh.tsx',
   'src/components/briefs/UploadBriefForm.tsx',
@@ -170,6 +171,27 @@ for (const rel of t4FailureTargets) {
     `failure panel states "no recovery action is wired yet" in ${rel}`,
     ok,
     'expected the literal phrase to appear in rendered text',
+  );
+}
+
+// Phase 4 T2 honest-copy: the failure injector button must not promise retry,
+// resolve, or reroute behavior — it only writes a failure packet.
+{
+  const rel = 'src/components/tickets/InjectControlledFailureButton.tsx';
+  const abs = path.join(root, rel);
+  const src = readFileSync(abs, 'utf8');
+  const hit = src.match(/\b(retry|resolve|reroute|rerun)\b/i);
+  let ok = hit === null;
+  if (!ok) {
+    const ctxStart = Math.max(0, hit.index - 80);
+    const ctxEnd = Math.min(src.length, hit.index + hit[0].length + 80);
+    const ctx = src.slice(ctxStart, ctxEnd).toLowerCase();
+    if (/\b(no|not|never|without)\b/.test(ctx)) ok = true;
+  }
+  check(
+    `injector button does not promise retry/resolve/reroute in ${rel}`,
+    ok,
+    `found "${hit?.[0]}" at offset ${hit?.index} without nearby negation`,
   );
 }
 

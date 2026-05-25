@@ -4,6 +4,7 @@ import { createSupabaseServerClient } from '@/lib/supabase/server';
 import { RunOrchestratorStubButton } from '@/components/tickets/RunOrchestratorStubButton';
 import { RunSpecialistPassButton } from '@/components/tickets/RunSpecialistPassButton';
 import { RunQaTruthReviewButton } from '@/components/tickets/RunQaTruthReviewButton';
+import { InjectControlledFailureButton } from '@/components/tickets/InjectControlledFailureButton';
 import { StatusPill } from '@/components/tickets/StatusPill';
 import { TicketProgressStrip } from '@/components/tickets/TicketProgressStrip';
 import { TicketAutoRefresh } from '@/components/tickets/TicketAutoRefresh';
@@ -144,6 +145,9 @@ export default async function TicketDetailPage({
     hasSpecialistEvent &&
     artifacts.length > 0 &&
     !(hasQaEvent && hasTruthEvent);
+  const canInjectFailure =
+    (ticket.status === 'open' || ticket.status === 'in_progress') &&
+    !packets.some((p) => p.packet_type === 'failure');
 
   const artifactPackets = packets.filter((p) => p.packet_type === 'artifact');
   const qaPackets = packets.filter(
@@ -246,6 +250,17 @@ export default async function TicketDetailPage({
         <section className="space-y-2 rounded border border-neutral-800 bg-neutral-950 p-4">
           <h2 className="text-sm font-medium text-neutral-200">QA + Truth Review</h2>
           <RunQaTruthReviewButton slug={workspace.slug} ticketId={ticket.id} />
+        </section>
+      ) : null}
+
+      {canInjectFailure ? (
+        <section className="space-y-2 rounded border border-amber-900/40 bg-amber-950/10 p-4">
+          <h2 className="text-sm font-medium text-amber-100">Failure test</h2>
+          <p className="text-[11px] text-neutral-400">
+            Create a controlled failure packet for this ticket. This is a demo/test action; no
+            recovery is wired yet.
+          </p>
+          <InjectControlledFailureButton slug={workspace.slug} ticketId={ticket.id} />
         </section>
       ) : null}
 

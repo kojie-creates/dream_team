@@ -275,6 +275,206 @@ export async function runOrchestratorClassification(
 }
 
 // ---------------------------------------------------------------------------
+// Phase 4 T2 — Controlled failure injector.
+//
+// Operator/test path to mark an eligible ticket as failed and emit a single
+// honest failure-evidence chain (workflow_run, trace_event, packet,
+// ticket update). Not a retry, not a resolve, not a reroute.
+//
+// Eligibility:
+//   - user session + workspace membership (RLS)
+//   - ticket in workspace
+//   - ticket.status in ('open','in_progress')
+//   - no existing failure packet for the ticket (idempotence)
+// ---------------------------------------------------------------------------
+
+const FAILURE_INJECT_EVENT_TYPE = 'failure.injected';
+const FAILURE_INJECT_AGENT = 'failure-injector';
+const FAILURE_INJECT_PHASE = 'phase4_t2';
+const FAILURE_INJECT_TYPE = 'execution_error';
+const FAILURE_INJECT_DETAIL =
+  'Controlled Phase 4 T2 failure injected for UI and evidence testing.';
+const FAILURE_INJECT_STATE =
+  'No external tool call was attempted. This failure was created by an explicit operator test action.';
+
+export async function injectControlledFailure(
+  _prev: OrchestratorRunState,
+  form: FormData,
+): Promise<OrchestratorRunState> {
+  const slug = String(form.get('slug') ?? '').trim();
+  const ticketId = String(form.get('ticketId') ?? '').trim();
+  if (!slug || !ticketId) return { error: 'Missing workspace or ticket.' };
+
+  // 1. RLS-gated authorization read.
+  const supabase = await createSupabaseServerClient();
+
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  if (!user) redirect('/signin');
+
+  const { data: workspace, error: wsErr } = await supabase
+    .from('workspaces')
+    .select('id, slug')
+    .eq('slug', slug)
+    .maybeSingle();
+  if (wsErr) return { error: wsErr.message };
+  if (!workspace) return { error: 'Workspace not found or access denied.' };
+
+  const { data: ticket, error: tErr } = await supabase
+    .from('tickets')
+    .select('id, status, workspace_id')
+    .eq('id', ticketId)
+    .eq('workspace_id', workspace.id)
+    .maybeSingle();
+  if (tErr) return { error: tErr.message };
+  if (!ticket) return { error: 'Ticket not found or access denied.' };
+
+  if (ticket.status !== 'open' && ticket.status !== 'in_progress') {
+    return {
+      error: `Ticket not eligible for failure injection (status: ${ticket.status}).`,
+    };
+  }
+
+  // Idempotence via RLS-readable failure packet.
+  const { data: existingFailurePacket, error: existPkErr } = await supabase
+    .from('packets')
+    .select('id')
+    .eq('ticket_id', ticket.id)
+    .eq('packet_type', 'failure')
+    .limit(1)
+    .maybeSingle();
+  if (existPkErr) return { error: existPkErr.message };
+  if (existingFailurePacket) {
+    revalidatePath(`/w/${slug}/tickets/${ticket.id}`);
+    return { error: null };
+  }
+
+  // 2. Service-role writes — only after RLS-gated auth + eligibility.
+  const service = createSupabaseServiceRoleClient();
+
+  // Service-side idempotence guard against races.
+  const { data: raceCheck } = await service
+    .from('packets')
+    .select('id')
+    .eq('ticket_id', ticket.id)
+    .eq('packet_type', 'failure')
+    .limit(1)
+    .maybeSingle();
+  if (raceCheck) {
+    revalidatePath(`/w/${slug}/tickets/${ticket.id}`);
+    return { error: null };
+  }
+
+  const now = new Date().toISOString();
+
+  // 2a. Workflow run — honestly recorded as failed.
+  const { data: run, error: runErr } = await service
+    .from('workflow_runs')
+    .insert({
+      workspace_id: workspace.id,
+      ticket_id: ticket.id,
+      run_kind: 'specialist',
+      agent_id: FAILURE_INJECT_AGENT,
+      model: 'deterministic/injector',
+      input_tokens: 0,
+      output_tokens: 0,
+      cost_usd: 0,
+      started_at: now,
+      ended_at: now,
+      status: 'failed',
+    })
+    .select('id')
+    .single();
+  if (runErr || !run) {
+    return { error: runErr?.message ?? 'Failed to write injector workflow run.' };
+  }
+
+  // 2b. Next seq.
+  const { data: maxRow, error: seqErr } = await service
+    .from('trace_events')
+    .select('seq')
+    .eq('ticket_id', ticket.id)
+    .order('seq', { ascending: false })
+    .limit(1)
+    .maybeSingle();
+  if (seqErr) return { error: seqErr.message };
+  const nextSeq = (maxRow?.seq ?? 0) + 1;
+
+  // 2c. Trace event.
+  const tracePayload = {
+    failure_type: FAILURE_INJECT_TYPE,
+    detail: FAILURE_INJECT_DETAIL,
+    controlled_test: true,
+    tool_use: false,
+    phase: FAILURE_INJECT_PHASE,
+  };
+
+  const { data: traceEvent, error: trErr } = await service
+    .from('trace_events')
+    .insert({
+      workspace_id: workspace.id,
+      ticket_id: ticket.id,
+      seq: nextSeq,
+      from_agent: FAILURE_INJECT_AGENT,
+      to_agent: 'central-orchestrator',
+      event_type: FAILURE_INJECT_EVENT_TYPE,
+      payload: tracePayload,
+    })
+    .select('id')
+    .single();
+  if (trErr || !traceEvent) {
+    return { error: trErr?.message ?? 'Failed to write failure trace event.' };
+  }
+
+  // 2d. Failure packet.
+  const bodyRaw =
+    `FAILURE PACKET\n` +
+    `From: ${FAILURE_INJECT_AGENT}\n` +
+    `To: central-orchestrator\n` +
+    `Work item: ${ticket.id}\n` +
+    `Failure type: ${FAILURE_INJECT_TYPE}\n` +
+    `Detail: ${FAILURE_INJECT_DETAIL}\n` +
+    `State at failure: ${FAILURE_INJECT_STATE}\n` +
+    `Recovery suggestion: stop`;
+
+  const { error: pkErr } = await service.from('packets').insert({
+    workspace_id: workspace.id,
+    ticket_id: ticket.id,
+    trace_event_id: traceEvent.id,
+    packet_type: 'failure',
+    body_raw: bodyRaw,
+    body_parsed: {
+      packet_kind: 'failure',
+      from: FAILURE_INJECT_AGENT,
+      to: 'central-orchestrator',
+      failure_type: FAILURE_INJECT_TYPE,
+      detail: FAILURE_INJECT_DETAIL,
+      state_at_failure: FAILURE_INJECT_STATE,
+      recovery_suggestion: 'stop',
+      phase: FAILURE_INJECT_PHASE,
+      tool_use: false,
+      controlled_test: true,
+    },
+  });
+  if (pkErr) return { error: pkErr.message };
+
+  // 2e. Ticket status + failure_type.
+  const { error: updErr } = await service
+    .from('tickets')
+    .update({
+      status: 'failed',
+      failure_type: FAILURE_INJECT_TYPE,
+      current_agent: FAILURE_INJECT_AGENT,
+    })
+    .eq('id', ticket.id);
+  if (updErr) return { error: updErr.message };
+
+  revalidatePath(`/w/${slug}/tickets/${ticket.id}`);
+  return { error: null };
+}
+
+// ---------------------------------------------------------------------------
 // Phase 2 T3 — Coordinator + Specialist pass. Deterministic. No model call.
 //
 // Lifecycle precondition: ticket.status === 'in_progress' and a row exists in
