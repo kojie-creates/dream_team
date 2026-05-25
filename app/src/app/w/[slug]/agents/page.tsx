@@ -30,7 +30,11 @@ export default async function AgentsPage({
         </p>
       </header>
 
-      <AgentCatalog groups={groups} total={entries.length} />
+      <AgentCatalog
+        groups={groups}
+        total={entries.length}
+        linkPrefix={`/w/${workspace.slug}/agents`}
+      />
     </div>
   );
 }

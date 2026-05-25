@@ -21,6 +21,10 @@ export interface AgentEntry {
   sourcePath: string;
 }
 
+export interface AgentDetail extends AgentEntry {
+  body: string;
+}
+
 const GROUP_ORDER: AgentGroup[] = [
   'Orchestrator',
   'Coordinators',
@@ -109,6 +113,24 @@ async function walk(dir: string, rel = ''): Promise<string[]> {
   return out;
 }
 
+function parseAgent(rel: string, src: string): AgentDetail {
+  const { meta, body } = parseFrontmatter(src);
+  const fileSlug = path.basename(rel, '.md');
+  const slug = (meta.name || fileSlug).trim();
+  const title = deriveTitle(body, slug);
+  const description = deriveSummary(body, meta.description);
+  const group = groupFromRelPath(rel);
+  return {
+    slug,
+    name: title,
+    title,
+    description,
+    group,
+    sourcePath: `agents/${rel.replace(/\\/g, '/')}`,
+    body,
+  };
+}
+
 export async function loadAgentCatalog(): Promise<AgentEntry[]> {
   const root = path.join(repoRoot(), 'agents');
   const rels = await walk(root);
@@ -116,23 +138,24 @@ export async function loadAgentCatalog(): Promise<AgentEntry[]> {
   for (const rel of rels) {
     const abs = path.join(root, rel);
     const src = await fs.readFile(abs, 'utf8');
-    const { meta, body } = parseFrontmatter(src);
-    const fileSlug = path.basename(rel, '.md');
-    const slug = (meta.name || fileSlug).trim();
-    const title = deriveTitle(body, slug);
-    const description = deriveSummary(body, meta.description);
-    const group = groupFromRelPath(rel);
-    entries.push({
-      slug,
-      name: title,
-      title,
-      description,
-      group,
-      sourcePath: `agents/${rel.replace(/\\/g, '/')}`,
-    });
+    const { body, ...meta } = parseAgent(rel, src);
+    void body;
+    entries.push(meta);
   }
   entries.sort((a, b) => a.name.localeCompare(b.name));
   return entries;
+}
+
+export async function loadAgentBySlug(slug: string): Promise<AgentDetail | null> {
+  const root = path.join(repoRoot(), 'agents');
+  const rels = await walk(root);
+  for (const rel of rels) {
+    const abs = path.join(root, rel);
+    const src = await fs.readFile(abs, 'utf8');
+    const detail = parseAgent(rel, src);
+    if (detail.slug === slug) return detail;
+  }
+  return null;
 }
 
 export interface AgentCatalogGroup {
