@@ -2,6 +2,7 @@ import type { ReactNode } from 'react';
 import { signOut } from '@/app/actions/auth';
 import type { WorkspaceListItem } from '@/lib/workspace/list';
 import { WorkspaceSwitcher } from './WorkspaceSwitcher';
+import { WorkspaceNav } from './WorkspaceNav';
 
 export function WorkspaceFrame({
   current,
@@ -30,6 +31,7 @@ export function WorkspaceFrame({
           </form>
         </div>
       </header>
+      <WorkspaceNav slug={current.slug} />
       <main className="mx-auto max-w-5xl px-4 py-8">{children}</main>
     </div>
   );

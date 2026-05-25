@@ -19,6 +19,10 @@ const targets = [
   'src/components/tickets/TicketAutoRefresh.tsx',
   'src/components/briefs/UploadBriefForm.tsx',
   'src/app/w/[slug]/new/upload/page.tsx',
+  'src/app/w/[slug]/agents/page.tsx',
+  'src/app/w/[slug]/history/page.tsx',
+  'src/app/w/[slug]/settings/page.tsx',
+  'src/components/workspace/WorkspaceNav.tsx',
 ];
 
 // T4 honest-copy targets: surfaces that talk about QA / Truth review must not
