@@ -2,6 +2,7 @@
 
 import { redirect } from 'next/navigation';
 import { revalidatePath } from 'next/cache';
+import type { SupabaseClient } from '@supabase/supabase-js';
 import { createSupabaseServerClient } from '@/lib/supabase/server';
 import { createSupabaseServiceRoleClient } from '@/lib/supabase/service';
 import {
@@ -466,6 +467,947 @@ export async function injectControlledFailure(
       status: 'failed',
       failure_type: FAILURE_INJECT_TYPE,
       current_agent: FAILURE_INJECT_AGENT,
+    })
+    .eq('id', ticket.id);
+  if (updErr) return { error: updErr.message };
+
+  revalidatePath(`/w/${slug}/tickets/${ticket.id}`);
+  return { error: null };
+}
+
+// ---------------------------------------------------------------------------
+// Phase 4 T4 — Needs-input flow (append-only).
+//
+// Two operator/test paths:
+//   - requestNeedsInput: orchestrator-side path. Records a structured
+//     question for the human. Marks ticket needs_input.
+//   - submitNeedsInputResponse: user-side path. Records a single
+//     structured response and moves the ticket back to in_progress.
+//
+// Append-only: the original question packet is never updated. The
+// question is considered resolved by the presence of a linked response
+// packet (matched via response packet's body_parsed.question_packet_id).
+//
+// No retry/resolve semantics — those land in Phase 4 T5.
+// ---------------------------------------------------------------------------
+
+const NEEDS_INPUT_REQUEST_EVENT_TYPE = 'input.requested';
+const NEEDS_INPUT_RESPONSE_EVENT_TYPE = 'input.responded';
+const NEEDS_INPUT_PHASE = 'phase4_t4';
+const NEEDS_INPUT_QUESTION_KIND = 'needs_input';
+const NEEDS_INPUT_RESPONSE_KIND = 'input_response';
+const NEEDS_INPUT_DEFAULT_QUESTION =
+  'What additional information is needed to continue this ticket?';
+const NEEDS_INPUT_DEFAULT_REASON =
+  'Controlled Phase 4 T4 test request. Orchestrator paused for one structured human answer.';
+const NEEDS_INPUT_MAX_RESPONSE_LEN = 4000;
+
+export async function requestNeedsInput(
+  _prev: OrchestratorRunState,
+  form: FormData,
+): Promise<OrchestratorRunState> {
+  const slug = String(form.get('slug') ?? '').trim();
+  const ticketId = String(form.get('ticketId') ?? '').trim();
+  if (!slug || !ticketId) return { error: 'Missing workspace or ticket.' };
+
+  const question =
+    String(form.get('question') ?? '').trim().slice(0, 1000) || NEEDS_INPUT_DEFAULT_QUESTION;
+  const reason =
+    String(form.get('reason') ?? '').trim().slice(0, 1000) || NEEDS_INPUT_DEFAULT_REASON;
+
+  // 1. RLS-gated authorization read.
+  const supabase = await createSupabaseServerClient();
+
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  if (!user) redirect('/signin');
+
+  const { data: workspace, error: wsErr } = await supabase
+    .from('workspaces')
+    .select('id, slug')
+    .eq('slug', slug)
+    .maybeSingle();
+  if (wsErr) return { error: wsErr.message };
+  if (!workspace) return { error: 'Workspace not found or access denied.' };
+
+  const { data: ticket, error: tErr } = await supabase
+    .from('tickets')
+    .select('id, status, workspace_id')
+    .eq('id', ticketId)
+    .eq('workspace_id', workspace.id)
+    .maybeSingle();
+  if (tErr) return { error: tErr.message };
+  if (!ticket) return { error: 'Ticket not found or access denied.' };
+
+  if (ticket.status !== 'open' && ticket.status !== 'in_progress') {
+    return {
+      error: `Ticket not eligible for needs-input request (status: ${ticket.status}).`,
+    };
+  }
+
+  // Idempotence: no unresolved needs_input packet. Walk the existing trace
+  // packets via RLS; unresolved = no input_response packet references it.
+  const unresolved = await findUnresolvedNeedsInputQuestion(supabase, ticket.id as string);
+  if ('error' in unresolved && unresolved.error) return { error: unresolved.error };
+  if ('packetId' in unresolved && unresolved.packetId) {
+    revalidatePath(`/w/${slug}/tickets/${ticket.id}`);
+    return { error: null };
+  }
+
+  // 2. Service-role writes — only after RLS-gated auth + eligibility.
+  const service = createSupabaseServiceRoleClient();
+
+  // Race guard.
+  const raceCheck = await findUnresolvedNeedsInputQuestion(service, ticket.id as string);
+  if ('packetId' in raceCheck && raceCheck.packetId) {
+    revalidatePath(`/w/${slug}/tickets/${ticket.id}`);
+    return { error: null };
+  }
+
+  const now = new Date().toISOString();
+
+  // 2a. Workflow run — orchestrator pause.
+  const { data: run, error: runErr } = await service
+    .from('workflow_runs')
+    .insert({
+      workspace_id: workspace.id,
+      ticket_id: ticket.id,
+      run_kind: 'orchestrator',
+      agent_id: 'central-orchestrator',
+      model: 'deterministic/needs-input',
+      input_tokens: 0,
+      output_tokens: 0,
+      cost_usd: 0,
+      started_at: now,
+      ended_at: now,
+      status: 'done',
+    })
+    .select('id')
+    .single();
+  if (runErr || !run) {
+    return { error: runErr?.message ?? 'Failed to write needs-input workflow run.' };
+  }
+
+  // 2b. Next seq.
+  const { data: maxRow, error: seqErr } = await service
+    .from('trace_events')
+    .select('seq')
+    .eq('ticket_id', ticket.id)
+    .order('seq', { ascending: false })
+    .limit(1)
+    .maybeSingle();
+  if (seqErr) return { error: seqErr.message };
+  const nextSeq = (maxRow?.seq ?? 0) + 1;
+
+  // 2c. Trace event.
+  const tracePayload = {
+    question,
+    reason,
+    phase: NEEDS_INPUT_PHASE,
+    controlled_test: true,
+    tool_use: false,
+  };
+
+  const { data: traceEvent, error: trErr } = await service
+    .from('trace_events')
+    .insert({
+      workspace_id: workspace.id,
+      ticket_id: ticket.id,
+      seq: nextSeq,
+      from_agent: 'central-orchestrator',
+      to_agent: 'user',
+      event_type: NEEDS_INPUT_REQUEST_EVENT_TYPE,
+      payload: tracePayload,
+    })
+    .select('id')
+    .single();
+  if (trErr || !traceEvent) {
+    return { error: trErr?.message ?? 'Failed to write needs-input trace event.' };
+  }
+
+  // 2d. Question packet.
+  const bodyRaw =
+    `NEEDS INPUT PACKET\n` +
+    `From: central-orchestrator\n` +
+    `To: user\n` +
+    `Work item: ${ticket.id}\n` +
+    `Question: ${question}\n` +
+    `Reason: ${reason}\n` +
+    `Resolved: false\n` +
+    `phase: ${NEEDS_INPUT_PHASE}`;
+
+  const { error: pkErr } = await service.from('packets').insert({
+    workspace_id: workspace.id,
+    ticket_id: ticket.id,
+    trace_event_id: traceEvent.id,
+    packet_type: 'trace',
+    body_raw: bodyRaw,
+    body_parsed: {
+      packet_kind: NEEDS_INPUT_QUESTION_KIND,
+      from: 'central-orchestrator',
+      to: 'user',
+      question,
+      reason,
+      resolved: false,
+      phase: NEEDS_INPUT_PHASE,
+      controlled_test: true,
+      tool_use: false,
+    },
+  });
+  if (pkErr) return { error: pkErr.message };
+
+  // 2e. Ticket status -> needs_input.
+  const { error: updErr } = await service
+    .from('tickets')
+    .update({
+      status: 'needs_input',
+      current_agent: 'central-orchestrator',
+    })
+    .eq('id', ticket.id);
+  if (updErr) return { error: updErr.message };
+
+  revalidatePath(`/w/${slug}/tickets/${ticket.id}`);
+  return { error: null };
+}
+
+export async function submitNeedsInputResponse(
+  _prev: OrchestratorRunState,
+  form: FormData,
+): Promise<OrchestratorRunState> {
+  const slug = String(form.get('slug') ?? '').trim();
+  const ticketId = String(form.get('ticketId') ?? '').trim();
+  const responseRaw = String(form.get('response') ?? '');
+  if (!slug || !ticketId) return { error: 'Missing workspace or ticket.' };
+
+  const response = responseRaw.trim();
+  if (response.length === 0) return { error: 'Response is empty.' };
+  if (response.length > NEEDS_INPUT_MAX_RESPONSE_LEN) {
+    return { error: `Response is too long (max ${NEEDS_INPUT_MAX_RESPONSE_LEN} chars).` };
+  }
+
+  // 1. RLS-gated authorization read.
+  const supabase = await createSupabaseServerClient();
+
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  if (!user) redirect('/signin');
+
+  const { data: workspace, error: wsErr } = await supabase
+    .from('workspaces')
+    .select('id, slug')
+    .eq('slug', slug)
+    .maybeSingle();
+  if (wsErr) return { error: wsErr.message };
+  if (!workspace) return { error: 'Workspace not found or access denied.' };
+
+  const { data: ticket, error: tErr } = await supabase
+    .from('tickets')
+    .select('id, status, workspace_id')
+    .eq('id', ticketId)
+    .eq('workspace_id', workspace.id)
+    .maybeSingle();
+  if (tErr) return { error: tErr.message };
+  if (!ticket) return { error: 'Ticket not found or access denied.' };
+
+  if (ticket.status !== 'needs_input') {
+    return { error: `Ticket not in needs_input state (status: ${ticket.status}).` };
+  }
+
+  const unresolved = await findUnresolvedNeedsInputQuestion(supabase, ticket.id as string);
+  if ('error' in unresolved && unresolved.error) return { error: unresolved.error };
+  if (!('packetId' in unresolved) || !unresolved.packetId) {
+    return { error: 'No unresolved needs-input question to answer.' };
+  }
+  const questionPacketId = unresolved.packetId;
+  const questionTraceId = unresolved.traceEventId;
+
+  // 2. Service-role writes — only after RLS-gated auth + eligibility.
+  const service = createSupabaseServiceRoleClient();
+
+  // Race guard: re-verify the question is still unresolved service-side.
+  const raceCheck = await findUnresolvedNeedsInputQuestion(service, ticket.id as string);
+  if (!('packetId' in raceCheck) || raceCheck.packetId !== questionPacketId) {
+    revalidatePath(`/w/${slug}/tickets/${ticket.id}`);
+    return { error: null };
+  }
+
+  const now = new Date().toISOString();
+
+  // 2a. Workflow run — user response (recorded as a deterministic specialist
+  //     run since the runtime doesn't have a 'user' run_kind).
+  const { error: runErr } = await service.from('workflow_runs').insert({
+    workspace_id: workspace.id,
+    ticket_id: ticket.id,
+    run_kind: 'orchestrator',
+    agent_id: 'central-orchestrator',
+    model: 'deterministic/needs-input',
+    input_tokens: 0,
+    output_tokens: 0,
+    cost_usd: 0,
+    started_at: now,
+    ended_at: now,
+    status: 'done',
+  });
+  if (runErr) return { error: runErr.message };
+
+  // 2b. Next seq.
+  const { data: maxRow, error: seqErr } = await service
+    .from('trace_events')
+    .select('seq')
+    .eq('ticket_id', ticket.id)
+    .order('seq', { ascending: false })
+    .limit(1)
+    .maybeSingle();
+  if (seqErr) return { error: seqErr.message };
+  const nextSeq = (maxRow?.seq ?? 0) + 1;
+
+  // 2c. Response trace event.
+  const tracePayload = {
+    response,
+    question_packet_id: questionPacketId,
+    question_trace_event_id: questionTraceId,
+    phase: NEEDS_INPUT_PHASE,
+    controlled_test: true,
+    tool_use: false,
+  };
+
+  const { data: traceEvent, error: trErr } = await service
+    .from('trace_events')
+    .insert({
+      workspace_id: workspace.id,
+      ticket_id: ticket.id,
+      seq: nextSeq,
+      from_agent: 'user',
+      to_agent: 'central-orchestrator',
+      event_type: NEEDS_INPUT_RESPONSE_EVENT_TYPE,
+      payload: tracePayload,
+    })
+    .select('id')
+    .single();
+  if (trErr || !traceEvent) {
+    return { error: trErr?.message ?? 'Failed to write needs-input response trace event.' };
+  }
+
+  // 2d. Response packet.
+  const bodyRaw =
+    `INPUT RESPONSE PACKET\n` +
+    `From: user\n` +
+    `To: central-orchestrator\n` +
+    `Work item: ${ticket.id}\n` +
+    `Question packet: ${questionPacketId}\n` +
+    `Resolved: true\n` +
+    `phase: ${NEEDS_INPUT_PHASE}\n` +
+    `---\n` +
+    response;
+
+  const { error: pkErr } = await service.from('packets').insert({
+    workspace_id: workspace.id,
+    ticket_id: ticket.id,
+    trace_event_id: traceEvent.id,
+    packet_type: 'trace',
+    body_raw: bodyRaw,
+    body_parsed: {
+      packet_kind: NEEDS_INPUT_RESPONSE_KIND,
+      from: 'user',
+      to: 'central-orchestrator',
+      response,
+      question_packet_id: questionPacketId,
+      question_trace_event_id: questionTraceId,
+      resolved: true,
+      phase: NEEDS_INPUT_PHASE,
+      controlled_test: true,
+      tool_use: false,
+    },
+  });
+  if (pkErr) return { error: pkErr.message };
+
+  // 2e. Ticket -> in_progress (no migration; preserve append-only evidence).
+  const { error: updErr } = await service
+    .from('tickets')
+    .update({
+      status: 'in_progress',
+      current_agent: 'central-orchestrator',
+    })
+    .eq('id', ticket.id);
+  if (updErr) return { error: updErr.message };
+
+  revalidatePath(`/w/${slug}/tickets/${ticket.id}`);
+  return { error: null };
+}
+
+// Append-only resolution check. Returns the most recent needs_input question
+// packet that has no matching input_response packet (matched by
+// body_parsed.question_packet_id). Works with either a session or service-role
+// client.
+async function findUnresolvedNeedsInputQuestion(
+  client: SupabaseClient,
+  ticketId: string,
+): Promise<
+  | { packetId: string | null; traceEventId: number | null; error?: undefined }
+  | { error: string }
+> {
+  const { data: packets, error: pkErr } = await client
+    .from('packets')
+    .select('id, trace_event_id, body_parsed, created_at')
+    .eq('ticket_id', ticketId)
+    .eq('packet_type', 'trace')
+    .order('created_at', { ascending: true });
+  if (pkErr) return { error: pkErr.message };
+
+  const rows = packets ?? [];
+  const questions = rows.filter(
+    (p) => (p.body_parsed as Record<string, unknown> | null)?.packet_kind === NEEDS_INPUT_QUESTION_KIND,
+  );
+  const responses = rows.filter(
+    (p) => (p.body_parsed as Record<string, unknown> | null)?.packet_kind === NEEDS_INPUT_RESPONSE_KIND,
+  );
+  const answeredIds = new Set(
+    responses
+      .map((p) => (p.body_parsed as Record<string, unknown> | null)?.question_packet_id)
+      .filter((v): v is string => typeof v === 'string'),
+  );
+
+  // Walk newest-first to surface the latest unresolved question.
+  for (let i = questions.length - 1; i >= 0; i--) {
+    const q = questions[i]!;
+    if (!answeredIds.has(q.id)) {
+      return { packetId: q.id, traceEventId: q.trace_event_id };
+    }
+  }
+  return { packetId: null, traceEventId: null };
+}
+
+// ---------------------------------------------------------------------------
+// Phase 4 T5 — Recovery actions.
+//
+// Append-only state-management controls. No model call, no evidence deletion.
+//
+//   - reopenFailedTicket: failed + >=1 failure packet -> open.
+//   - holdLoopedTicket:   looped + loop_signature   -> needs_input (human-review).
+//
+// Both write a recovery trace event + recovery packet, preserving all prior
+// evidence (failure packets, loop signature, traces).
+// ---------------------------------------------------------------------------
+
+const RECOVERY_PHASE = 'phase4_t5';
+const RECOVERY_REOPEN_EVENT = 'recovery.requested';
+const RECOVERY_HOLD_EVENT = 'recovery.hold_requested';
+
+async function writeRecoveryEvidence(args: {
+  service: SupabaseClient;
+  workspaceId: string;
+  ticketId: string;
+  action: 'reopen_for_orchestrator' | 'hold_for_human_review';
+  eventType: string;
+  fromAgent: string;
+  toAgent: string;
+  previousStatus: string;
+  nextStatus: string;
+  reason: string;
+}): Promise<{ error: string | null }> {
+  const now = new Date().toISOString();
+
+  const { error: runErr } = await args.service.from('workflow_runs').insert({
+    workspace_id: args.workspaceId,
+    ticket_id: args.ticketId,
+    run_kind: 'orchestrator',
+    agent_id: args.fromAgent,
+    model: 'deterministic/recovery',
+    input_tokens: 0,
+    output_tokens: 0,
+    cost_usd: 0,
+    started_at: now,
+    ended_at: now,
+    status: 'done',
+  });
+  if (runErr) return { error: runErr.message };
+
+  const { data: maxRow, error: seqErr } = await args.service
+    .from('trace_events')
+    .select('seq')
+    .eq('ticket_id', args.ticketId)
+    .order('seq', { ascending: false })
+    .limit(1)
+    .maybeSingle();
+  if (seqErr) return { error: seqErr.message };
+  const nextSeq = (maxRow?.seq ?? 0) + 1;
+
+  const payload = {
+    action: args.action,
+    previous_status: args.previousStatus,
+    next_status: args.nextStatus,
+    reason: args.reason,
+    preserves_evidence: true,
+    phase: RECOVERY_PHASE,
+    controlled_test: false,
+    tool_use: false,
+  };
+
+  const { data: traceEvent, error: trErr } = await args.service
+    .from('trace_events')
+    .insert({
+      workspace_id: args.workspaceId,
+      ticket_id: args.ticketId,
+      seq: nextSeq,
+      from_agent: args.fromAgent,
+      to_agent: args.toAgent,
+      event_type: args.eventType,
+      payload,
+    })
+    .select('id')
+    .single();
+  if (trErr || !traceEvent) {
+    return { error: trErr?.message ?? 'Failed to write recovery trace event.' };
+  }
+
+  const bodyRaw =
+    `RECOVERY PACKET\n` +
+    `From: ${args.fromAgent}\n` +
+    `To: ${args.toAgent}\n` +
+    `Work item: ${args.ticketId}\n` +
+    `Action: ${args.action}\n` +
+    `Previous status: ${args.previousStatus}\n` +
+    `Next status: ${args.nextStatus}\n` +
+    `Preserves evidence: true\n` +
+    `phase: ${RECOVERY_PHASE}\n` +
+    `Reason: ${args.reason}`;
+
+  const { error: pkErr } = await args.service.from('packets').insert({
+    workspace_id: args.workspaceId,
+    ticket_id: args.ticketId,
+    trace_event_id: traceEvent.id,
+    packet_type: 'trace',
+    body_raw: bodyRaw,
+    body_parsed: {
+      packet_kind: 'recovery',
+      from: args.fromAgent,
+      to: args.toAgent,
+      action: args.action,
+      previous_status: args.previousStatus,
+      next_status: args.nextStatus,
+      reason: args.reason,
+      preserves_evidence: true,
+      phase: RECOVERY_PHASE,
+      tool_use: false,
+    },
+  });
+  if (pkErr) return { error: pkErr.message };
+
+  return { error: null };
+}
+
+export async function reopenFailedTicket(
+  _prev: OrchestratorRunState,
+  form: FormData,
+): Promise<OrchestratorRunState> {
+  const slug = String(form.get('slug') ?? '').trim();
+  const ticketId = String(form.get('ticketId') ?? '').trim();
+  if (!slug || !ticketId) return { error: 'Missing workspace or ticket.' };
+
+  // 1. RLS-gated read.
+  const supabase = await createSupabaseServerClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  if (!user) redirect('/signin');
+
+  const { data: workspace, error: wsErr } = await supabase
+    .from('workspaces')
+    .select('id, slug')
+    .eq('slug', slug)
+    .maybeSingle();
+  if (wsErr) return { error: wsErr.message };
+  if (!workspace) return { error: 'Workspace not found or access denied.' };
+
+  const { data: ticket, error: tErr } = await supabase
+    .from('tickets')
+    .select('id, status, workspace_id')
+    .eq('id', ticketId)
+    .eq('workspace_id', workspace.id)
+    .maybeSingle();
+  if (tErr) return { error: tErr.message };
+  if (!ticket) return { error: 'Ticket not found or access denied.' };
+
+  if (ticket.status !== 'failed') {
+    return { error: `Ticket not eligible for reopen (status: ${ticket.status}).` };
+  }
+
+  const { data: failurePacket, error: fpErr } = await supabase
+    .from('packets')
+    .select('id')
+    .eq('ticket_id', ticket.id)
+    .eq('packet_type', 'failure')
+    .limit(1)
+    .maybeSingle();
+  if (fpErr) return { error: fpErr.message };
+  if (!failurePacket) {
+    return { error: 'No failure packet present; cannot reopen.' };
+  }
+
+  // 2. Service-role writes after RLS auth.
+  const service = createSupabaseServiceRoleClient();
+
+  const reason =
+    'Operator-initiated reopen after failure. Prior failure evidence preserved.';
+
+  const evidence = await writeRecoveryEvidence({
+    service,
+    workspaceId: workspace.id as string,
+    ticketId: ticket.id as string,
+    action: 'reopen_for_orchestrator',
+    eventType: RECOVERY_REOPEN_EVENT,
+    fromAgent: 'user',
+    toAgent: 'central-orchestrator',
+    previousStatus: 'failed',
+    nextStatus: 'open',
+    reason,
+  });
+  if (evidence.error) return { error: evidence.error };
+
+  const { error: updErr } = await service
+    .from('tickets')
+    .update({
+      status: 'open',
+      current_agent: 'central-orchestrator',
+    })
+    .eq('id', ticket.id);
+  if (updErr) return { error: updErr.message };
+
+  revalidatePath(`/w/${slug}/tickets/${ticket.id}`);
+  return { error: null };
+}
+
+export async function holdLoopedTicket(
+  _prev: OrchestratorRunState,
+  form: FormData,
+): Promise<OrchestratorRunState> {
+  const slug = String(form.get('slug') ?? '').trim();
+  const ticketId = String(form.get('ticketId') ?? '').trim();
+  if (!slug || !ticketId) return { error: 'Missing workspace or ticket.' };
+
+  // 1. RLS-gated read.
+  const supabase = await createSupabaseServerClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  if (!user) redirect('/signin');
+
+  const { data: workspace, error: wsErr } = await supabase
+    .from('workspaces')
+    .select('id, slug')
+    .eq('slug', slug)
+    .maybeSingle();
+  if (wsErr) return { error: wsErr.message };
+  if (!workspace) return { error: 'Workspace not found or access denied.' };
+
+  const { data: ticket, error: tErr } = await supabase
+    .from('tickets')
+    .select('id, status, workspace_id, loop_signature')
+    .eq('id', ticketId)
+    .eq('workspace_id', workspace.id)
+    .maybeSingle();
+  if (tErr) return { error: tErr.message };
+  if (!ticket) return { error: 'Ticket not found or access denied.' };
+
+  if (ticket.status !== 'looped') {
+    return { error: `Ticket not eligible for hold (status: ${ticket.status}).` };
+  }
+  if (!ticket.loop_signature) {
+    return { error: 'Ticket has no loop_signature; cannot hold for review.' };
+  }
+
+  // 2. Service-role writes after RLS auth.
+  const service = createSupabaseServiceRoleClient();
+
+  const reason =
+    'Operator-initiated hold for human review after detected loop. Loop signature and prior evidence preserved.';
+
+  const evidence = await writeRecoveryEvidence({
+    service,
+    workspaceId: workspace.id as string,
+    ticketId: ticket.id as string,
+    action: 'hold_for_human_review',
+    eventType: RECOVERY_HOLD_EVENT,
+    fromAgent: 'user',
+    toAgent: 'human-review',
+    previousStatus: 'looped',
+    nextStatus: 'needs_input',
+    reason,
+  });
+  if (evidence.error) return { error: evidence.error };
+
+  // Preserve loop_signature; update status + current_agent only.
+  const { error: updErr } = await service
+    .from('tickets')
+    .update({
+      status: 'needs_input',
+      current_agent: 'human-review',
+    })
+    .eq('id', ticket.id);
+  if (updErr) return { error: updErr.message };
+
+  revalidatePath(`/w/${slug}/tickets/${ticket.id}`);
+  return { error: null };
+}
+
+// ---------------------------------------------------------------------------
+// Phase 4 T3 — Controlled loop simulation.
+//
+// Operator/test path. Marks an eligible ticket as `looped`, writes a
+// deterministic loop signature, two `loop.iteration.detected` trace events
+// with identical from/to and state_changed=false (matching the
+// Loop Termination Contract's repeat-with-no-state-change shape), a
+// `loop.terminated` trace event, and a failure packet with
+// failure_type='timeout'. No retry/resolve/reroute behavior.
+//
+// Eligibility:
+//   - user session + workspace membership (RLS)
+//   - ticket in workspace
+//   - ticket.status in ('open','in_progress')
+//   - no existing failure packet for the ticket
+//   - no existing loop_signature
+// ---------------------------------------------------------------------------
+
+const LOOP_ITERATION_EVENT_TYPE = 'loop.iteration.detected';
+const LOOP_TERMINATED_EVENT_TYPE = 'loop.terminated';
+const LOOP_SIM_AGENT = 'loop-simulator';
+const LOOP_PHASE = 'phase4_t3';
+const LOOP_FAILURE_TYPE = 'timeout';
+const LOOP_FAILURE_DETAIL = 'loop detected - no state change between iterations';
+const LOOP_STATE_AT_FAILURE =
+  'Two consecutive controlled loop iterations used the same from/to agents with state_changed=false.';
+const LOOP_MAX_ITERATIONS = 15;
+
+function buildLoopSignature(ticketId: string): string {
+  return `loop:${LOOP_PHASE}:${ticketId}:${LOOP_SIM_AGENT}->central-orchestrator`;
+}
+
+export async function injectControlledLoop(
+  _prev: OrchestratorRunState,
+  form: FormData,
+): Promise<OrchestratorRunState> {
+  const slug = String(form.get('slug') ?? '').trim();
+  const ticketId = String(form.get('ticketId') ?? '').trim();
+  if (!slug || !ticketId) return { error: 'Missing workspace or ticket.' };
+
+  // 1. RLS-gated authorization read.
+  const supabase = await createSupabaseServerClient();
+
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  if (!user) redirect('/signin');
+
+  const { data: workspace, error: wsErr } = await supabase
+    .from('workspaces')
+    .select('id, slug')
+    .eq('slug', slug)
+    .maybeSingle();
+  if (wsErr) return { error: wsErr.message };
+  if (!workspace) return { error: 'Workspace not found or access denied.' };
+
+  const { data: ticket, error: tErr } = await supabase
+    .from('tickets')
+    .select('id, status, workspace_id, loop_signature')
+    .eq('id', ticketId)
+    .eq('workspace_id', workspace.id)
+    .maybeSingle();
+  if (tErr) return { error: tErr.message };
+  if (!ticket) return { error: 'Ticket not found or access denied.' };
+
+  if (ticket.status !== 'open' && ticket.status !== 'in_progress') {
+    return {
+      error: `Ticket not eligible for loop simulation (status: ${ticket.status}).`,
+    };
+  }
+
+  if (ticket.loop_signature) {
+    revalidatePath(`/w/${slug}/tickets/${ticket.id}`);
+    return { error: null };
+  }
+
+  // Idempotence via RLS-readable failure packet.
+  const { data: existingFailurePacket, error: existPkErr } = await supabase
+    .from('packets')
+    .select('id')
+    .eq('ticket_id', ticket.id)
+    .eq('packet_type', 'failure')
+    .limit(1)
+    .maybeSingle();
+  if (existPkErr) return { error: existPkErr.message };
+  if (existingFailurePacket) {
+    revalidatePath(`/w/${slug}/tickets/${ticket.id}`);
+    return { error: null };
+  }
+
+  // 2. Service-role writes — only after RLS-gated auth + eligibility.
+  const service = createSupabaseServiceRoleClient();
+
+  // Service-side race guard.
+  const { data: raceCheck } = await service
+    .from('packets')
+    .select('id')
+    .eq('ticket_id', ticket.id)
+    .eq('packet_type', 'failure')
+    .limit(1)
+    .maybeSingle();
+  if (raceCheck) {
+    revalidatePath(`/w/${slug}/tickets/${ticket.id}`);
+    return { error: null };
+  }
+  const { data: raceSigCheck } = await service
+    .from('tickets')
+    .select('loop_signature')
+    .eq('id', ticket.id)
+    .maybeSingle();
+  if (raceSigCheck?.loop_signature) {
+    revalidatePath(`/w/${slug}/tickets/${ticket.id}`);
+    return { error: null };
+  }
+
+  const loopSignature = buildLoopSignature(ticket.id as string);
+  const now = new Date().toISOString();
+
+  // 2a. Workflow run — honestly recorded as failed (loop terminated).
+  const { data: run, error: runErr } = await service
+    .from('workflow_runs')
+    .insert({
+      workspace_id: workspace.id,
+      ticket_id: ticket.id,
+      run_kind: 'specialist',
+      agent_id: LOOP_SIM_AGENT,
+      model: 'deterministic/loop-simulator',
+      input_tokens: 0,
+      output_tokens: 0,
+      cost_usd: 0,
+      started_at: now,
+      ended_at: now,
+      status: 'failed',
+    })
+    .select('id')
+    .single();
+  if (runErr || !run) {
+    return { error: runErr?.message ?? 'Failed to write loop simulator workflow run.' };
+  }
+
+  // 2b. Next seq.
+  const { data: maxRow, error: seqErr } = await service
+    .from('trace_events')
+    .select('seq')
+    .eq('ticket_id', ticket.id)
+    .order('seq', { ascending: false })
+    .limit(1)
+    .maybeSingle();
+  if (seqErr) return { error: seqErr.message };
+  const iter1Seq = (maxRow?.seq ?? 0) + 1;
+  const iter2Seq = iter1Seq + 1;
+  const termSeq = iter2Seq + 1;
+
+  // 2c. Two consecutive loop iteration trace events — same from/to, no state change.
+  const baseIterPayload = {
+    loop_signature: loopSignature,
+    max_iterations: LOOP_MAX_ITERATIONS,
+    state_changed: false,
+    controlled_test: true,
+    tool_use: false,
+    phase: LOOP_PHASE,
+  };
+
+  const { error: iter1Err } = await service.from('trace_events').insert({
+    workspace_id: workspace.id,
+    ticket_id: ticket.id,
+    seq: iter1Seq,
+    from_agent: LOOP_SIM_AGENT,
+    to_agent: 'central-orchestrator',
+    event_type: LOOP_ITERATION_EVENT_TYPE,
+    payload: { ...baseIterPayload, iteration_count: 1 },
+  });
+  if (iter1Err) return { error: iter1Err.message };
+
+  const { error: iter2Err } = await service.from('trace_events').insert({
+    workspace_id: workspace.id,
+    ticket_id: ticket.id,
+    seq: iter2Seq,
+    from_agent: LOOP_SIM_AGENT,
+    to_agent: 'central-orchestrator',
+    event_type: LOOP_ITERATION_EVENT_TYPE,
+    payload: { ...baseIterPayload, iteration_count: 2 },
+  });
+  if (iter2Err) return { error: iter2Err.message };
+
+  // 2d. Termination trace event — failure_type=timeout, from central-orchestrator.
+  const termPayload = {
+    loop_signature: loopSignature,
+    failure_type: LOOP_FAILURE_TYPE,
+    detail: LOOP_FAILURE_DETAIL,
+    controlled_test: true,
+    tool_use: false,
+    phase: LOOP_PHASE,
+  };
+
+  const { data: termEvent, error: termErr } = await service
+    .from('trace_events')
+    .insert({
+      workspace_id: workspace.id,
+      ticket_id: ticket.id,
+      seq: termSeq,
+      from_agent: 'central-orchestrator',
+      to_agent: 'user',
+      event_type: LOOP_TERMINATED_EVENT_TYPE,
+      payload: termPayload,
+    })
+    .select('id')
+    .single();
+  if (termErr || !termEvent) {
+    return { error: termErr?.message ?? 'Failed to write loop terminated trace event.' };
+  }
+
+  // 2e. Failure packet linked to the termination event.
+  const bodyRaw =
+    `FAILURE PACKET\n` +
+    `From: central-orchestrator\n` +
+    `To: user\n` +
+    `Work item: ${ticket.id}\n` +
+    `Failure type: ${LOOP_FAILURE_TYPE}\n` +
+    `Detail: ${LOOP_FAILURE_DETAIL}\n` +
+    `State at failure: ${LOOP_STATE_AT_FAILURE}\n` +
+    `Loop signature: ${loopSignature}\n` +
+    `Recovery suggestion: stop\n` +
+    `phase: ${LOOP_PHASE}\n` +
+    `controlled_test: true`;
+
+  const { error: pkErr } = await service.from('packets').insert({
+    workspace_id: workspace.id,
+    ticket_id: ticket.id,
+    trace_event_id: termEvent.id,
+    packet_type: 'failure',
+    body_raw: bodyRaw,
+    body_parsed: {
+      packet_kind: 'failure',
+      from: 'central-orchestrator',
+      to: 'user',
+      failure_type: LOOP_FAILURE_TYPE,
+      detail: LOOP_FAILURE_DETAIL,
+      state_at_failure: LOOP_STATE_AT_FAILURE,
+      recovery_suggestion: 'stop',
+      loop_signature: loopSignature,
+      phase: LOOP_PHASE,
+      tool_use: false,
+      controlled_test: true,
+    },
+  });
+  if (pkErr) return { error: pkErr.message };
+
+  // 2f. Ticket → looped + loop_signature + failure_type.
+  const { error: updErr } = await service
+    .from('tickets')
+    .update({
+      status: 'looped',
+      failure_type: LOOP_FAILURE_TYPE,
+      loop_signature: loopSignature,
+      current_agent: 'central-orchestrator',
     })
     .eq('id', ticket.id);
   if (updErr) return { error: updErr.message };

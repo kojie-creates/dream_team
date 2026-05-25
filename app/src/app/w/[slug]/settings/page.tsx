@@ -29,7 +29,7 @@ export default async function SettingsLandingPage({
     .maybeSingle();
   if (!workspace) notFound();
 
-  const [memberCountRes, inviteCountRes, ownMemberRes] = await Promise.all([
+  const [memberCountRes, inviteCountRes, ownMemberRes, runCountRes] = await Promise.all([
     supabase
       .from('workspace_members')
       .select('user_id', { count: 'exact', head: true })
@@ -44,12 +44,17 @@ export default async function SettingsLandingPage({
       .eq('workspace_id', workspace.id)
       .eq('user_id', user.id)
       .maybeSingle(),
+    supabase
+      .from('workflow_runs')
+      .select('id', { count: 'exact', head: true })
+      .eq('workspace_id', workspace.id),
   ]);
 
   const memberCount = memberCountRes.count ?? 0;
   const inviteCount = inviteCountRes.count ?? null; // null when RLS blocks (non-admin)
   const ownRole = (ownMemberRes.data?.role ?? null) as string | null;
   const canSeeInvites = inviteCount !== null;
+  const runCount = runCountRes.count ?? 0;
 
   const metaCells = [
     { label: 'Name', value: workspace.name },
@@ -127,20 +132,23 @@ export default async function SettingsLandingPage({
             </div>
           </li>
           <li>
-            <div
-              aria-disabled="true"
-              className="block rounded border border-neutral-800 bg-neutral-950 p-4 opacity-70"
+            <Link
+              href={`/w/${workspace.slug}/settings/usage`}
+              className="block rounded border border-neutral-800 bg-neutral-950 p-4 hover:border-neutral-600"
             >
               <div className="flex items-center justify-between">
-                <p className="text-sm font-medium text-neutral-200">Billing</p>
-                <span className="rounded bg-neutral-800 px-1.5 py-0.5 text-[10px] font-medium uppercase tracking-wider text-neutral-400">
-                  Phase 4
+                <p className="text-sm font-medium text-neutral-100">Usage</p>
+                <span className="rounded bg-emerald-950 px-1.5 py-0.5 text-[10px] font-medium uppercase tracking-wider text-emerald-200">
+                  Live
                 </span>
               </div>
               <p className="mt-1 text-xs text-neutral-500">
-                Plan: {workspace.plan ?? '—'}. No billing meter or budget yet.
+                {runCount} recorded run{runCount === 1 ? '' : 's'} · plan: {workspace.plan ?? '—'}
               </p>
-            </div>
+              <p className="mt-1 text-[11px] text-neutral-500">
+                Approximate tokens and cost from recorded runs. Not billing-grade.
+              </p>
+            </Link>
           </li>
           <li>
             <div

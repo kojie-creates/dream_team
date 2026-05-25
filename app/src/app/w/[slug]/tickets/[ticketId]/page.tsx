@@ -5,10 +5,18 @@ import { RunOrchestratorStubButton } from '@/components/tickets/RunOrchestratorS
 import { RunSpecialistPassButton } from '@/components/tickets/RunSpecialistPassButton';
 import { RunQaTruthReviewButton } from '@/components/tickets/RunQaTruthReviewButton';
 import { InjectControlledFailureButton } from '@/components/tickets/InjectControlledFailureButton';
+import { InjectControlledLoopButton } from '@/components/tickets/InjectControlledLoopButton';
+import { RequestNeedsInputButton } from '@/components/tickets/RequestNeedsInputButton';
+import {
+  HoldLoopedTicketAction,
+  ReopenFailedTicketAction,
+} from '@/components/tickets/RecoveryActions';
 import { StatusPill } from '@/components/tickets/StatusPill';
 import { TicketProgressStrip } from '@/components/tickets/TicketProgressStrip';
 import { TicketAutoRefresh } from '@/components/tickets/TicketAutoRefresh';
 import { FailureEvidencePanel } from '@/components/tickets/FailureEvidencePanel';
+import { LoopEvidencePanel } from '@/components/tickets/LoopEvidencePanel';
+import { NeedsInputPanel } from '@/components/tickets/NeedsInputPanel';
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
@@ -73,7 +81,7 @@ export default async function TicketDetailPage({
 
   const { data: ticket } = await supabase
     .from('tickets')
-    .select('id, title, status, layer, current_agent, failure_type, created_at, brief_id')
+    .select('id, title, status, layer, current_agent, failure_type, loop_signature, created_at, brief_id')
     .eq('id', ticketId)
     .eq('workspace_id', workspace.id)
     .maybeSingle();
@@ -148,6 +156,43 @@ export default async function TicketDetailPage({
   const canInjectFailure =
     (ticket.status === 'open' || ticket.status === 'in_progress') &&
     !packets.some((p) => p.packet_type === 'failure');
+  const canInjectLoop =
+    (ticket.status === 'open' || ticket.status === 'in_progress') &&
+    !ticket.loop_signature &&
+    !packets.some((p) => p.packet_type === 'failure');
+
+  const needsInputQuestionPackets = packets.filter(
+    (p) =>
+      p.packet_type === 'trace' &&
+      (p.body_parsed as Record<string, unknown> | null)?.packet_kind === 'needs_input',
+  );
+  const needsInputResponsePackets = packets.filter(
+    (p) =>
+      p.packet_type === 'trace' &&
+      (p.body_parsed as Record<string, unknown> | null)?.packet_kind === 'input_response',
+  );
+  const answeredQuestionIds = new Set(
+    needsInputResponsePackets
+      .map((p) => (p.body_parsed as Record<string, unknown> | null)?.question_packet_id)
+      .filter((v): v is string => typeof v === 'string'),
+  );
+  const hasUnresolvedNeedsInput = needsInputQuestionPackets.some(
+    (q) => !answeredQuestionIds.has(q.id),
+  );
+  const canRequestNeedsInput =
+    (ticket.status === 'open' || ticket.status === 'in_progress') &&
+    !hasUnresolvedNeedsInput;
+
+  const canReopenFailed =
+    ticket.status === 'failed' && packets.some((p) => p.packet_type === 'failure');
+  const canHoldLooped =
+    ticket.status === 'looped' && typeof ticket.loop_signature === 'string';
+  const hasAnyPhase4Action =
+    canInjectFailure ||
+    canInjectLoop ||
+    canRequestNeedsInput ||
+    canReopenFailed ||
+    canHoldLooped;
 
   const artifactPackets = packets.filter((p) => p.packet_type === 'artifact');
   const qaPackets = packets.filter(
@@ -157,6 +202,14 @@ export default async function TicketDetailPage({
   );
   const truthPackets = packets.filter((p) => p.packet_type === 'truth');
   const failurePackets = packets.filter((p) => p.packet_type === 'failure');
+  const loopFailurePackets = failurePackets.filter(
+    (p) =>
+      typeof (p.body_parsed as Record<string, unknown> | null)?.loop_signature === 'string',
+  );
+  const nonLoopFailurePackets = failurePackets.filter(
+    (p) =>
+      typeof (p.body_parsed as Record<string, unknown> | null)?.loop_signature !== 'string',
+  );
   const rejectedTruthPackets = truthPackets.filter(
     (p) => (p.body_parsed as Record<string, unknown> | null)?.verdict === 'rejected_internal',
   );
@@ -182,6 +235,15 @@ export default async function TicketDetailPage({
               failure_type: {ticket.failure_type}
             </span>
           ) : null}
+          {ticket.loop_signature ? (
+            <span
+              className="rounded bg-violet-900/40 px-1.5 py-0.5 font-mono text-[11px] text-violet-200"
+              title={ticket.loop_signature as string}
+            >
+              loop_signature: {(ticket.loop_signature as string).slice(0, 48)}
+              {(ticket.loop_signature as string).length > 48 ? '…' : ''}
+            </span>
+          ) : null}
           {ticket.layer ? <span>Layer: {ticket.layer}</span> : null}
           {ticket.current_agent ? <span>Agent: {ticket.current_agent}</span> : null}
           <span>Opened {new Date(ticket.created_at).toLocaleString()}</span>
@@ -194,10 +256,52 @@ export default async function TicketDetailPage({
         ) : null}
       </header>
 
+      <NeedsInputPanel
+        slug={workspace.slug}
+        ticketId={ticket.id as string}
+        ticketStatus={ticket.status as string}
+        questionPackets={needsInputQuestionPackets.map((p) => ({
+          id: p.id,
+          trace_event_id: p.trace_event_id,
+          body_parsed: p.body_parsed,
+          body_raw: p.body_raw,
+          created_at: p.created_at,
+        }))}
+        responsePackets={needsInputResponsePackets.map((p) => ({
+          id: p.id,
+          trace_event_id: p.trace_event_id,
+          body_parsed: p.body_parsed,
+          body_raw: p.body_raw,
+          created_at: p.created_at,
+        }))}
+        traceEvents={traceEvents.map((e) => ({
+          id: e.id,
+          seq: e.seq,
+          event_type: e.event_type,
+        }))}
+      />
+
+      <LoopEvidencePanel
+        ticketStatus={ticket.status as string}
+        ticketLoopSignature={(ticket.loop_signature as string | null) ?? null}
+        loopFailurePackets={loopFailurePackets.map((p) => ({
+          id: p.id,
+          trace_event_id: p.trace_event_id,
+          body_parsed: p.body_parsed,
+          body_raw: p.body_raw,
+          created_at: p.created_at,
+        }))}
+        traceEvents={traceEvents.map((e) => ({
+          id: e.id,
+          seq: e.seq,
+          event_type: e.event_type,
+        }))}
+      />
+
       <FailureEvidencePanel
         ticketStatus={ticket.status as string}
         ticketFailureType={(ticket.failure_type as string | null) ?? null}
-        failurePackets={failurePackets.map((p) => ({
+        failurePackets={nonLoopFailurePackets.map((p) => ({
           id: p.id,
           trace_event_id: p.trace_event_id,
           body_parsed: p.body_parsed,
@@ -253,15 +357,58 @@ export default async function TicketDetailPage({
         </section>
       ) : null}
 
-      {canInjectFailure ? (
-        <section className="space-y-2 rounded border border-amber-900/40 bg-amber-950/10 p-4">
-          <h2 className="text-sm font-medium text-amber-100">Failure test</h2>
-          <p className="text-[11px] text-neutral-400">
-            Create a controlled failure packet for this ticket. This is a demo/test action; no
-            recovery is wired yet.
+      {hasAnyPhase4Action ? (
+        <details className="rounded border border-neutral-800 bg-neutral-950 p-4">
+          <summary className="cursor-pointer text-sm font-medium text-neutral-200">
+            Phase 4 inspector / test controls
+          </summary>
+          <p className="mt-2 text-[11px] text-neutral-500">
+            Controlled state-management actions. No model calls. All evidence is preserved
+            (append-only). Only eligible actions appear.
           </p>
-          <InjectControlledFailureButton slug={workspace.slug} ticketId={ticket.id} />
-        </section>
+          <div className="mt-3 space-y-3">
+            {canReopenFailed ? (
+              <ReopenFailedTicketAction slug={workspace.slug} ticketId={ticket.id} />
+            ) : null}
+            {canHoldLooped ? (
+              <HoldLoopedTicketAction slug={workspace.slug} ticketId={ticket.id} />
+            ) : null}
+            {canInjectFailure ? (
+              <div className="space-y-2 rounded border border-amber-900/40 bg-amber-950/10 p-3">
+                <h3 className="text-[11px] font-medium uppercase tracking-wider text-amber-100">
+                  Failure test
+                </h3>
+                <p className="text-[11px] text-neutral-400">
+                  Create a controlled failure packet for this ticket. Demo/test action.
+                </p>
+                <InjectControlledFailureButton slug={workspace.slug} ticketId={ticket.id} />
+              </div>
+            ) : null}
+            {canInjectLoop ? (
+              <div className="space-y-2 rounded border border-violet-900/40 bg-violet-950/10 p-3">
+                <h3 className="text-[11px] font-medium uppercase tracking-wider text-violet-100">
+                  Loop test
+                </h3>
+                <p className="text-[11px] text-neutral-400">
+                  Create a controlled loop signature for this ticket. Demo/test action.
+                </p>
+                <InjectControlledLoopButton slug={workspace.slug} ticketId={ticket.id} />
+              </div>
+            ) : null}
+            {canRequestNeedsInput ? (
+              <div className="space-y-2 rounded border border-sky-900/40 bg-sky-950/10 p-3">
+                <h3 className="text-[11px] font-medium uppercase tracking-wider text-sky-100">
+                  Needs input test
+                </h3>
+                <p className="text-[11px] text-neutral-400">
+                  Pause the workflow and ask for one structured human answer. Demo/test action.
+                  Continuation back to in_progress lands in the T4 response flow.
+                </p>
+                <RequestNeedsInputButton slug={workspace.slug} ticketId={ticket.id} />
+              </div>
+            ) : null}
+          </div>
+        </details>
       ) : null}
 
       <section className="space-y-2">
