@@ -27,7 +27,7 @@ export const CONNECTOR_CATALOG: ConnectorCatalogEntry[] = [
     summary: 'Read upcoming events to ground scheduling-aware agent runs.',
     plannedScopes: ['View your calendars and events (read-only)'],
     phase: 'planned-t3',
-    actionNote: 'OAuth handler lands in Phase 5 T3. Button is disabled until then.',
+    actionNote: 'Read-only Calendar scope. Tokens stored server-side only. No event ingest or writes.',
   },
   {
     provider: 'google_drive',

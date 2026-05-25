@@ -167,6 +167,22 @@ export default async function SettingsLandingPage({
               </p>
             </Link>
           </li>
+          <li>
+            <Link
+              href={`/w/${workspace.slug}/settings/automations`}
+              className="block rounded border border-neutral-800 bg-neutral-950 p-4 hover:border-neutral-600"
+            >
+              <div className="flex items-center justify-between">
+                <p className="text-sm font-medium text-neutral-100">Automations</p>
+                <span className="rounded bg-neutral-800 px-1.5 py-0.5 text-[10px] font-medium uppercase tracking-wider text-neutral-300">
+                  Manual only
+                </span>
+              </div>
+              <p className="mt-1 text-xs text-neutral-500">
+                User-defined ingest rules. Manual runs first — no scheduler yet.
+              </p>
+            </Link>
+          </li>
         </ul>
       </section>
 

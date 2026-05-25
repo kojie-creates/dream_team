@@ -17,6 +17,7 @@ import { TicketAutoRefresh } from '@/components/tickets/TicketAutoRefresh';
 import { FailureEvidencePanel } from '@/components/tickets/FailureEvidencePanel';
 import { LoopEvidencePanel } from '@/components/tickets/LoopEvidencePanel';
 import { NeedsInputPanel } from '@/components/tickets/NeedsInputPanel';
+import { CalendarHoldPanel } from '@/components/tickets/CalendarHoldPanel';
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
@@ -410,6 +411,13 @@ export default async function TicketDetailPage({
           </div>
         </details>
       ) : null}
+
+      <CalendarHoldPanel
+        slug={workspace.slug}
+        workspaceId={workspace.id as string}
+        ticketId={ticket.id as string}
+        ticketTitle={ticket.title as string}
+      />
 
       <section className="space-y-2">
         <h2 className="text-sm font-medium text-neutral-200">Source brief</h2>

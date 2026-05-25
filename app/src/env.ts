@@ -12,6 +12,13 @@ const serverSchema = z.object({
   ANTHROPIC_CLASSIFY_MODEL: z.string().min(1).default('claude-haiku-4-5'),
   // OpenAI key reserved for future provider parity. Not wired in Phase 2.
   OPENAI_API_KEY: z.string().min(1).optional(),
+  // Phase 5 T3 — Google Calendar OAuth + connector token encryption.
+  // All three are server-only. Optional so non-OAuth dev paths keep working;
+  // the OAuth start route enforces presence at request time.
+  GOOGLE_CLIENT_ID: z.string().min(1).optional(),
+  GOOGLE_CLIENT_SECRET: z.string().min(1).optional(),
+  // Hex-encoded 32 bytes (64 hex chars) for AES-256-GCM. Server-only.
+  CONNECTOR_TOKEN_ENCRYPTION_KEY: z.string().min(1).optional(),
 });
 
 const clientSchema = z.object({

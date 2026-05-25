@@ -1,5 +1,12 @@
+import Link from 'next/link';
 import type { ConnectorCatalogEntry } from '@/lib/connectors/catalog';
 import { CONNECTOR_STATUS_LABELS, type ConnectorStatus } from '@/lib/connectors/types';
+import { disconnectGoogleCalendar } from '@/app/actions/connectors';
+
+async function disconnectAction(formData: FormData): Promise<void> {
+  'use server';
+  await disconnectGoogleCalendar({ error: null, ok: null }, formData);
+}
 
 export type ConnectorRow = {
   id: string;
@@ -34,17 +41,27 @@ function fmtDate(iso: string | null): string | null {
 export function ConnectorCard({
   entry,
   row,
+  workspaceSlug,
+  accountEmail,
 }: {
   entry: ConnectorCatalogEntry;
   row: ConnectorRow | null;
+  workspaceSlug: string;
+  accountEmail: string | null;
 }) {
-  const statusKey: ConnectorStatus | 'not_connected' = row ? row.status : 'not_connected';
+  const isGoogleCalendar = entry.provider === 'google_calendar';
+  const status: ConnectorStatus | 'not_connected' = row ? row.status : 'not_connected';
   const statusLabel = row ? CONNECTOR_STATUS_LABELS[row.status] : 'Not connected';
-  const tone = STATUS_TONE[statusKey];
+  const tone = STATUS_TONE[status];
   const isFirstTarget = entry.phase === 'planned-t3';
-  const actionLabel = isFirstTarget ? 'Connect (Phase 5 T3)' : 'Later';
   const connectedAt = fmtDate(row?.connected_at ?? null);
   const lastSyncAt = fmtDate(row?.last_sync_at ?? null);
+
+  const isLive = isGoogleCalendar;
+  const isConnected = status === 'connected';
+  const connectHref = isLive
+    ? `/w/${workspaceSlug}/settings/connectors/google-calendar/start`
+    : null;
 
   return (
     <li className="rounded-lg border border-neutral-800 bg-neutral-900/40 p-4">
@@ -79,6 +96,12 @@ export function ConnectorCard({
           </dd>
         </div>
         <div className="space-y-0.5">
+          {isConnected && accountEmail ? (
+            <p>
+              <span className="uppercase tracking-wider text-neutral-600">Account:</span>{' '}
+              <span className="text-neutral-300">{accountEmail}</span>
+            </p>
+          ) : null}
           {row?.scopes?.length ? (
             <p>
               <span className="uppercase tracking-wider text-neutral-600">Granted:</span>{' '}
@@ -107,16 +130,51 @@ export function ConnectorCard({
       </dl>
 
       <div className="mt-3 flex items-center justify-between gap-3">
-        <button
-          type="button"
-          disabled
-          aria-disabled="true"
-          className="cursor-not-allowed rounded border border-neutral-800 bg-neutral-900 px-3 py-1 text-xs text-neutral-400"
-        >
-          {actionLabel}
-        </button>
+        {isLive && isConnected ? (
+          <div className="flex items-center gap-2">
+            <Link
+              href={`/w/${workspaceSlug}/settings/connectors/google-calendar`}
+              className="rounded border border-sky-900/60 bg-sky-950/40 px-3 py-1 text-xs text-sky-200 hover:bg-sky-950/60"
+            >
+              View events
+            </Link>
+            <form action={disconnectAction}>
+              <input type="hidden" name="slug" value={workspaceSlug} />
+              <button
+                type="submit"
+                className="rounded border border-rose-900/60 bg-rose-950/40 px-3 py-1 text-xs text-rose-200 hover:bg-rose-950/60"
+              >
+                Disconnect
+              </button>
+            </form>
+          </div>
+        ) : isLive && status === 'error' ? (
+          <Link
+            href={connectHref ?? '#'}
+            className="rounded border border-amber-900/60 bg-amber-950/40 px-3 py-1 text-xs text-amber-200 hover:bg-amber-950/60"
+          >
+            Reconnect Google Calendar
+          </Link>
+        ) : isLive ? (
+          <Link
+            href={connectHref ?? '#'}
+            className="rounded border border-sky-900/60 bg-sky-950/40 px-3 py-1 text-xs text-sky-200 hover:bg-sky-950/60"
+          >
+            Connect Google Calendar
+          </Link>
+        ) : (
+          <button
+            type="button"
+            disabled
+            aria-disabled="true"
+            className="cursor-not-allowed rounded border border-neutral-800 bg-neutral-900 px-3 py-1 text-xs text-neutral-400"
+          >
+            Later
+          </button>
+        )}
         <p className="text-[11px] text-neutral-500">{entry.actionNote}</p>
       </div>
     </li>
   );
 }
+
