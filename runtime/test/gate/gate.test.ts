@@ -79,7 +79,64 @@ describe('grants.ts — code-developer §4 matrix encoding', () => {
   });
 
   it('returns undefined for an unknown role (fail-closed, no permissive default)', () => {
-    expect(roleGrant('devops')).toBeUndefined();
+    expect(roleGrant('nonexistent-role')).toBeUndefined();
+  });
+});
+
+// ── grants.ts: the full §4 matrix (all 24 roles) ─────────────────────────────
+
+describe('grants.ts — full §4 matrix', () => {
+  it('encodes all 24 tabulated roles', () => {
+    const roles = [
+      'central-orchestrator', 'research-coordinator', 'build-coordinator',
+      'operate-coordinator', 'distribution-coordinator', 'learning-coordinator',
+      'architect', 'ux-designer', 'code-developer', 'qa-testing', 'truth-agent',
+      'devops', 'data-pipeline', 'security', 'performance-optimization',
+      'marketing-strategy', 'content-creation', 'sales-enablement', 'community-manager',
+      'analytics', 'customer-insight', 'experimentation', 'strategy-advisor',
+      'distribution-packager',
+    ];
+    for (const r of roles) expect(roleGrant(r), r).toBeDefined();
+    expect(roles).toHaveLength(24);
+  });
+
+  // Spot-checks pinning the distinctive cells of each layer.
+  const spot: Array<[string, Capability, Tier | undefined]> = [
+    // Coordinators: SPAWN+HO at T2, no filesystem.
+    ['central-orchestrator', 'SPAWN', 'T2'],
+    ['build-coordinator', 'W', undefined],
+    ['learning-coordinator', 'HO', 'T2'],
+    // Build separation of duties: qa read-only on source, truth read+sign.
+    ['qa-testing', 'W', undefined],
+    ['qa-testing', 'SH', 'T2'],
+    ['truth-agent', 'W', 'T3'],
+    ['truth-agent', 'SH', undefined],
+    // Operate holds the T1 production-reach caps.
+    ['devops', 'DEP', 'T1'],
+    ['devops', 'SEC', 'T1'],
+    ['devops', 'CONw', 'T1'],
+    ['devops', 'SPEND', 'T1'],
+    ['data-pipeline', 'DEP', 'T2'], // pipeline deploy is T2, not T1
+    ['security', 'SEC', 'T1'], // read-only audit
+    ['security', 'CONw', undefined], // ✗
+    ['security', 'DEP', undefined], // ✗
+    ['performance-optimization', 'SPEND', 'T2'],
+    ['performance-optimization', 'SEC', undefined], // ✗
+    // Distribution: only community-manager reaches outside; COMM is T1.
+    ['marketing-strategy', 'COMM', undefined], // ✗
+    ['community-manager', 'COMM', 'T1'],
+    ['community-manager', 'CONw', 'T1'],
+    // Learning: read-and-recommend, HO gated upstream at T2.
+    ['analytics', 'HO', 'T2'],
+    ['analytics', 'CONr', 'T2'],
+    ['analytics', 'NETr', undefined], // ✗ (DB read only)
+    ['strategy-advisor', 'NETr', undefined], // ✗
+    // Packager builds dist/ with shell, cannot deploy.
+    ['distribution-packager', 'SH', 'T2'],
+    ['distribution-packager', 'DEP', undefined], // ✗
+  ];
+  it.each(spot)('roleGrant(%s)[%s] = %s', (role, cap, tier) => {
+    expect(roleGrant(role)![cap]).toBe(tier);
   });
 });
 
