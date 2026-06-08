@@ -2,6 +2,7 @@
   "name": "dream-team-desktop",
   "version": "0.1.0",
   "description": "Dream Team desktop shell (Electron) — hosts the governed runtime in main; renderer triggers runs via IPC. Consumes ../runtime. See docs/ADR-001-executable-core.md Decision 1/7.",
+  "author": "felix montanez",
   "private": true,
   "main": "out/main/index.js",
   "scripts": {
