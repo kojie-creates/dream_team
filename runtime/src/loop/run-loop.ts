@@ -279,7 +279,7 @@ export async function runLoop(opts: RunLoopOptions): Promise<RunResult> {
       for (const block of toolUses) {
         const { observation, decision, resolvedPath } = await handleToolUse(
           block,
-          { boundary, toolsByName, ctx: gateContext(opts, boundary) },
+          { boundary, toolsByName, ctx: gateContext(opts, boundary), confine: opts.confinement },
         );
 
         // Step 4c: emit exactly one tool.executed event per tool call (Decision 4;
@@ -453,6 +453,7 @@ interface HandleDeps {
   boundary: WorkspaceBoundary;
   toolsByName: Map<string, AnyToolDef>;
   ctx: GateContext;
+  confine: ConfinementProvider;
 }
 
 /**
@@ -520,6 +521,7 @@ async function handleToolUse(
   if (decision.verdict === 'permit') {
     const observation = await toolDef.execute(input, {
       boundary: deps.boundary,
+      confine: deps.confine,
     });
     return { observation, decision, resolvedPath };
   }

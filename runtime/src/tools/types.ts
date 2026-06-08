@@ -16,6 +16,7 @@
 
 import type { Capability, Tier } from '../gate/types.ts';
 import type { WorkspaceBoundary } from '../gate/workspace.ts';
+import type { ConfinementProvider } from '../confine/provider.ts';
 
 /**
  * Minimal JSON-Schema shape surfaced to the model in `tools[]`. Slice 1 only
@@ -33,6 +34,13 @@ export type JSONSchema = Record<string, unknown>;
 export interface ToolExecContext {
   /** The run's confinement boundary (realpath'd root); SOURCE OF TRUTH for the open-once re-check. */
   boundary: WorkspaceBoundary;
+  /**
+   * The run's confinement provider (Decision 8). Shell-class tools REQUIRE
+   * `confine.kind === 'os'` and run via `confine.exec()`; path tools (write_file)
+   * ignore it and use `boundary`. Optional so non-shell ctx construction (and the
+   * test harness) needn't supply it — a shell tool refuses when it is absent.
+   */
+  confine?: ConfinementProvider;
   /**
    * TEST-ONLY race-window seam (Decision 2a.5). If present, `execute()` awaits it
    * AFTER resolveWorkspace() returns ok but BEFORE opening the handle, so a test
