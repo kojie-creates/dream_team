@@ -86,10 +86,11 @@ describe('grants.ts — code-developer §4 matrix encoding', () => {
 // ── grants.ts: the full §4 matrix (all 24 roles) ─────────────────────────────
 
 describe('grants.ts — full §4 matrix', () => {
-  it('encodes all 24 tabulated roles', () => {
+  it('encodes all 28 roles', () => {
     const roles = [
       'central-orchestrator', 'research-coordinator', 'build-coordinator',
       'operate-coordinator', 'distribution-coordinator', 'learning-coordinator',
+      'research-analyst', 'market-intelligence', 'idea-generator', 'knowledge-librarian',
       'architect', 'ux-designer', 'code-developer', 'qa-testing', 'truth-agent',
       'devops', 'data-pipeline', 'security', 'performance-optimization',
       'marketing-strategy', 'content-creation', 'sales-enablement', 'community-manager',
@@ -97,7 +98,7 @@ describe('grants.ts — full §4 matrix', () => {
       'distribution-packager',
     ];
     for (const r of roles) expect(roleGrant(r), r).toBeDefined();
-    expect(roles).toHaveLength(24);
+    expect(roles).toHaveLength(28);
   });
 
   // Spot-checks pinning the distinctive cells of each layer.
@@ -106,6 +107,12 @@ describe('grants.ts — full §4 matrix', () => {
     ['central-orchestrator', 'SPAWN', 'T2'],
     ['build-coordinator', 'W', undefined],
     ['learning-coordinator', 'HO', 'T2'],
+    // Research: read-and-synthesize, browse-to-read, no execution/spawn.
+    ['research-analyst', 'NETr', 'T2'],
+    ['research-analyst', 'W', 'T3'],
+    ['research-analyst', 'SPAWN', undefined], // ✗ — specialists don't spawn
+    ['idea-generator', 'NETr', undefined], // ✗ — purely generative, no browse
+    ['knowledge-librarian', 'W', 'T3'],
     // Build separation of duties: qa read-only on source, truth read+sign.
     ['qa-testing', 'W', undefined],
     ['qa-testing', 'SH', 'T2'],

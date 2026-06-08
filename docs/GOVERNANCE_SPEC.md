@@ -72,6 +72,17 @@ Cell = tier the role exercises that capability at. `✗` = not granted. Blank = 
 
 > Coordinators route and assign. They cannot touch the filesystem, shell, or network. Their power is `SPAWN` + `HO` — both gated at T2 (assignment is the authorization surface).
 
+### Research Layer (read-and-synthesize — no execution, no external write)
+
+| Role | MDL | R | W | NETr | NETw | CON | SEC | DEP | SPAWN | COMM | HO |
+|---|---|---|---|---|---|---|---|---|---|---|---|
+| research-analyst | T0 | T0 | T3 (briefs) | T2 | ✗ | ✗ | ✗ | ✗ | ✗ | ✗ | T3 |
+| market-intelligence | T0 | T0 | T3 (reports) | T2 | ✗ | ✗ | ✗ | ✗ | ✗ | ✗ | T3 |
+| idea-generator | T0 | T0 | T3 (concepts) | ✗ | ✗ | ✗ | ✗ | ✗ | ✗ | ✗ | T3 |
+| knowledge-librarian | T0 | T0 | T3 (index) | T2 | ✗ | ✗ | ✗ | ✗ | ✗ | ✗ | T3 |
+
+> Research scans sources and writes internal briefs — never executes, deploys, spends, or reaches outside. Browse-to-read is `NETr` T2; `idea-generator` is purely generative (no browse). Like Distribution's drafting roles, all output is internal and handed off (`HO` T3) for an approved downstream step.
+
 ### Build Layer (the primary executors)
 
 | Role | MDL | R | W | DEL | SH | NETr | NETw | CON | SEC | DEP | SPAWN | HO |

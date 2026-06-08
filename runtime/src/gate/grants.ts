@@ -4,7 +4,7 @@
 // (never a global) so sub-agent intersection (parent ∩ requested, §8.5) can slot
 // in later without reworking the gate or loop.
 //
-// This is the FULL §4 matrix — all 24 roles the spec tabulates, grouped by layer
+// This is the FULL §4 matrix — all 28 roles, grouped by layer
 // exactly as §4 presents them. A capability ABSENT from a role's map is `✗`
 // (out-of-grant) by construction — the gate blocks it as blocked_scope before any
 // tier eval (§6). So each row lists ONLY the capabilities the role actually holds;
@@ -33,6 +33,14 @@ const MATRIX: Readonly<Record<string, RoleGrant>> = {
   'operate-coordinator': { MDL: 'T0', R: 'T0', SPAWN: 'T2', HO: 'T2' },
   'distribution-coordinator': { MDL: 'T0', R: 'T0', SPAWN: 'T2', HO: 'T2' },
   'learning-coordinator': { MDL: 'T0', R: 'T0', SPAWN: 'T2', HO: 'T2' }, // HO gated upstream
+
+  // ── Research Layer (read-and-synthesize — no execution, no external write) ───
+  // Browse-to-read sources (NETr), write internal briefs (W), hand off to the
+  // Research Coordinator. idea-generator is purely generative → no browse (NETr ✗).
+  'research-analyst': { MDL: 'T0', R: 'T0', W: 'T3', NETr: 'T2', HO: 'T3' }, // briefs
+  'market-intelligence': { MDL: 'T0', R: 'T0', W: 'T3', NETr: 'T2', HO: 'T3' }, // reports
+  'idea-generator': { MDL: 'T0', R: 'T0', W: 'T3', HO: 'T3' }, // concepts (internal only)
+  'knowledge-librarian': { MDL: 'T0', R: 'T0', W: 'T3', NETr: 'T2', HO: 'T3' }, // index
 
   // ── Build Layer (the primary executors) ─────────────────────────────────────
   'architect': { MDL: 'T0', R: 'T0', W: 'T3', NETr: 'T2', HO: 'T3' }, // design/ADR
