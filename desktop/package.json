@@ -1,0 +1,38 @@
+{
+  "name": "dream-team-desktop",
+  "version": "0.1.0",
+  "description": "Dream Team desktop shell (Electron) — hosts the governed runtime in main; renderer triggers runs via IPC. Consumes ../runtime. See docs/ADR-001-executable-core.md Decision 1/7.",
+  "private": true,
+  "main": "out/main/index.js",
+  "scripts": {
+    "dev": "cross-env NODE_OPTIONS= electron-vite dev",
+    "build": "electron-vite build",
+    "preview": "cross-env NODE_OPTIONS= electron-vite preview",
+    "typecheck": "tsc --noEmit -p tsconfig.node.json && tsc --noEmit -p tsconfig.web.json",
+    "dist:win": "electron-vite build && electron-builder --win",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@anthropic-ai/sdk": "^0.69.0",
+    "@supabase/supabase-js": "^2.106.1",
+    "ws": "^8.18.0",
+    "zod": "^4.4.3"
+  },
+  "devDependencies": {
+    "@electron-toolkit/tsconfig": "^2.0.0",
+    "@types/ws": "^8.5.0",
+    "cross-env": "^7.0.3",
+    "@types/node": "^20",
+    "@types/react": "^18.3.0",
+    "@types/react-dom": "^18.3.0",
+    "@vitejs/plugin-react": "^4.3.0",
+    "electron": "^28.3.3",
+    "electron-builder": "^24.13.0",
+    "electron-vite": "^2.3.0",
+    "react": "^18.3.0",
+    "react-dom": "^18.3.0",
+    "typescript": "^5.4.5",
+    "vite": "^5.0.0",
+    "vitest": "^2.1.9"
+  }
+}
