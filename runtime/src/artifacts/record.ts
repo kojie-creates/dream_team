@@ -51,6 +51,12 @@ export interface ArtifactRecord {
   /** `artifacts.bytes` — REAL byte length of the written content (>= 0). */
   bytes: number;
   /**
+   * Absolute on-disk path of the written file. NOT a table column — carried so an
+   * upload-capable sink can read the bytes to upload to Storage (migration 0012).
+   * Dropped at the sink seam for sinks that do not upload.
+   */
+  abs_path: string;
+  /**
    * The role that produced the artifact. The `artifacts` table has no
    * `created_by` column (it is RLS-scoped via `workspace_id`), so this is carried
    * for the trace/audit lineage, not the table row, and is dropped at the sink
@@ -84,6 +90,8 @@ export interface ArtifactSink {
     storage_path: string | null;
     mime_type: string | null;
     bytes: number;
+    /** Abs path of the written file, for an upload-capable sink. Optional. */
+    abs_path?: string;
   }): unknown;
 }
 
@@ -102,6 +110,7 @@ export function sinkArtifactEmitter(sink: ArtifactSink): ArtifactEmitter {
         storage_path: record.storage_path,
         mime_type: record.mime_type,
         bytes: record.bytes,
+        abs_path: record.abs_path,
       });
     },
   };
@@ -254,9 +263,10 @@ export async function recordArtifactIfLive(
     workspace_id: ctx.workspaceId,
     ticket_id: ctx.ticketId,
     kind: spec.kind,
-    storage_path: null, // ADR §4.4: Storage upload deferred — null for now.
+    storage_path: null, // recorded null; an upload-capable sink stamps it after upload (0012).
     mime_type: spec.mimeType ?? null,
     bytes: result.bytes, // REAL byte length from the liveness stat.
+    abs_path: spec.absPath, // for the sink's Storage upload.
     created_by: ctx.role,
   });
   return result;

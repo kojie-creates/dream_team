@@ -30,8 +30,11 @@ import {
   appendTraceEventRpc,
   appendArtifactRpc,
   appendPacketRpc,
+  setArtifactStoragePathRpc,
+  supabaseArtifactStorage,
   isWorkspaceMember,
 } from './db/client.ts';
+import { makeArtifactUploadFn } from './artifacts/upload.ts';
 import type { SupabaseRpcClient } from './db/client.ts';
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -118,7 +121,19 @@ export async function startRun(input: StartRunInput, deps: StartRunDeps): Promis
     deps.failureEmitter ?? sinkFailureEmitter(failureSink!);
 
   // Artifacts (append_artifact). The sink input carries workspace/ticket per row.
-  const artifactSink = rpcArtifactSink({ rpc: appendArtifactRpc(deps.supabase) });
+  // When the real client exposes Storage (production), the sink also uploads the
+  // file bytes and stamps storage_path (migration 0012); the rpc-only test fake
+  // has no .storage, so the upload step is skipped and the row is recorded as before.
+  const artifactStorage = supabaseArtifactStorage(deps.supabase);
+  const artifactSink = rpcArtifactSink({
+    rpc: appendArtifactRpc(deps.supabase),
+    upload: artifactStorage
+      ? makeArtifactUploadFn({
+          storage: artifactStorage,
+          setStoragePath: setArtifactStoragePathRpc(deps.supabase),
+        })
+      : undefined,
+  });
   const artifactEmitter = sinkArtifactEmitter(artifactSink);
 
   // Confinement root is realpath'd ONCE here (the app→confinement seam); the

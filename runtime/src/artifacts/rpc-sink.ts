@@ -8,6 +8,7 @@
 // Decoupling (ADR §4): no electron, no @supabase/supabase-js import.
 
 import type { ArtifactKind, ArtifactSink } from './record.ts';
+import type { ArtifactUploadFn } from './upload.ts';
 
 /** Args for the `append_artifact` RPC (migration 0011 parameter names). */
 export interface AppendArtifactParams {
@@ -35,8 +36,20 @@ export interface RpcArtifactSink extends ArtifactSink {
   readonly failures: ReadonlyArray<ArtifactWriteFailure>;
 }
 
-/** Build an RPC-backed ArtifactSink. `flush()` rejects if any write failed. */
-export function rpcArtifactSink(opts: { rpc: AppendArtifactRpc }): RpcArtifactSink {
+/**
+ * Build an RPC-backed ArtifactSink. `flush()` rejects if any write failed.
+ *
+ * When `upload` is supplied (production, migration 0012), each append chains:
+ * `append_artifact` (row, storage_path null) → returns id → upload the bytes →
+ * `set_artifact_storage_path`. The chain is tracked by the same pending/flush
+ * machinery, so an upload or link failure is surfaced, never silent (ordering A:
+ * a failed upload leaves a recorded row with a null storage_path — retryable).
+ * Without `upload` (tests), behavior is unchanged: record the row only.
+ */
+export function rpcArtifactSink(opts: {
+  rpc: AppendArtifactRpc;
+  upload?: ArtifactUploadFn;
+}): RpcArtifactSink {
   const pending = new Set<Promise<unknown>>();
   const failures: ArtifactWriteFailure[] = [];
 
@@ -44,23 +57,35 @@ export function rpcArtifactSink(opts: { rpc: AppendArtifactRpc }): RpcArtifactSi
     failures,
 
     append(input) {
-      const call = opts
-        .rpc({
+      const work = (async (): Promise<string> => {
+        const id = await opts.rpc({
           p_workspace_id: input.workspace_id,
           p_ticket_id: input.ticket_id,
           p_kind: input.kind,
           p_storage_path: input.storage_path,
           p_mime_type: input.mime_type,
           p_bytes: input.bytes,
-        })
-        .catch((error: unknown) => {
-          failures.push({ kind: input.kind, error });
-          throw error;
         });
-      const tracked = call.finally(() => pending.delete(tracked));
+        if (opts.upload && input.abs_path) {
+          await opts.upload({
+            artifactId: id,
+            workspaceId: input.workspace_id,
+            ticketId: input.ticket_id,
+            absPath: input.abs_path,
+            bytes: input.bytes,
+            mimeType: input.mime_type,
+            kind: input.kind,
+          });
+        }
+        return id;
+      })().catch((error: unknown) => {
+        failures.push({ kind: input.kind, error });
+        throw error;
+      });
+      const tracked = work.finally(() => pending.delete(tracked));
       pending.add(tracked);
       tracked.catch(() => {});
-      return call;
+      return work;
     },
 
     async flush() {

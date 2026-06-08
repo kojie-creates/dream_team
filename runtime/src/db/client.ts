@@ -15,6 +15,7 @@ import type {
 } from '../trace/rpc-sink.ts';
 import type { AppendArtifactParams, AppendArtifactRpc } from '../artifacts/rpc-sink.ts';
 import type { AppendPacketParams, AppendPacketRpc } from '../packets/rpc-sink.ts';
+import type { ArtifactStorage, SetStoragePathRpc } from '../artifacts/upload.ts';
 
 /** Project endpoint + PUBLISHABLE (anon) key. The service-role key is NEVER here. */
 export interface SupabaseConfig {
@@ -38,6 +39,20 @@ export interface SupabaseRpcClient {
     fn: string,
     params: Record<string, unknown>,
   ): Promise<{ data: unknown; error: { message: string } | null }>;
+  /**
+   * Storage surface — present on the real supabase-js client, absent on the
+   * rpc-only test fake. Optional so artifact-bytes upload is opt-in: when absent
+   * (tests), the runtime records the row with a null storage_path as before.
+   */
+  storage?: {
+    from(bucket: string): {
+      upload(
+        path: string,
+        body: Uint8Array,
+        opts?: { contentType?: string; upsert?: boolean },
+      ): Promise<{ data: unknown; error: { message: string } | null }>;
+    };
+  };
 }
 
 /** Injectable `createClient` (default = `@supabase/supabase-js`). */
@@ -134,6 +149,43 @@ export function appendPacketRpc(client: SupabaseRpcClient): AppendPacketRpc {
       throw new Error('append_packet returned no uuid');
     }
     return id;
+  };
+}
+
+/**
+ * Wrap a user-session client into the `SetStoragePathRpc` the artifact uploader
+ * needs (migration 0012). Calls `set_artifact_storage_path` AS the user; its own
+ * auth/member guard applies. A Postgres error throws.
+ */
+export function setArtifactStoragePathRpc(client: SupabaseRpcClient): SetStoragePathRpc {
+  return async (artifactId: string, storagePath: string): Promise<void> => {
+    const { error } = await client.rpc('set_artifact_storage_path', {
+      p_artifact_id: artifactId,
+      p_storage_path: storagePath,
+    });
+    if (error) {
+      throw new Error(`set_artifact_storage_path RPC failed: ${error.message}`);
+    }
+  };
+}
+
+/**
+ * Adapt the real client's Storage surface into the runtime's `ArtifactStorage`
+ * seam (uploads to the private `artifacts` bucket, migration 0012). Returns
+ * `undefined` when the client has no `.storage` (the rpc-only test fake) — the
+ * caller then records the artifact row without uploading bytes.
+ */
+export function supabaseArtifactStorage(client: SupabaseRpcClient): ArtifactStorage | undefined {
+  if (!client.storage) return undefined;
+  const bucket = client.storage.from('artifacts');
+  return {
+    async upload(objectPath, body, opts) {
+      const { error } = await bucket.upload(objectPath, body, {
+        contentType: opts.contentType,
+        upsert: false,
+      });
+      return { error };
+    },
   };
 }
 

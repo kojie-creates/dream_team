@@ -10,6 +10,8 @@ import {
   appendTraceEventRpc,
   appendArtifactRpc,
   appendPacketRpc,
+  setArtifactStoragePathRpc,
+  supabaseArtifactStorage,
   isWorkspaceMember,
 } from '../../src/db/client.ts';
 import type { CreateClientFn, SupabaseRpcClient } from '../../src/db/client.ts';
@@ -28,6 +30,7 @@ function fakeSupabase(opts: { member?: boolean; rpcError?: string } = {}) {
       }
       if (fn === 'append_artifact') return { data: 'artifact-uuid', error: null };
       if (fn === 'append_packet') return { data: 'packet-uuid', error: null };
+      if (fn === 'set_artifact_storage_path') return { data: null, error: null };
       return { data: null, error: null };
     },
   };
@@ -134,6 +137,58 @@ describe('appendPacketRpc', () => {
         p_packet_type: 'failure', p_body_raw: null, p_body_parsed: {},
       }),
     ).rejects.toThrow(/append_packet RPC failed: boom/);
+  });
+});
+
+describe('setArtifactStoragePathRpc', () => {
+  it('calls set_artifact_storage_path with the id + path', async () => {
+    const { client, calls } = fakeSupabase();
+    await setArtifactStoragePathRpc(client)('artifact-uuid', 'ws/tk/artifact-uuid/hello.txt');
+    expect(calls[0]!.fn).toBe('set_artifact_storage_path');
+    expect(calls[0]!.params).toEqual({
+      p_artifact_id: 'artifact-uuid',
+      p_storage_path: 'ws/tk/artifact-uuid/hello.txt',
+    });
+  });
+
+  it('throws on RPC error', async () => {
+    const { client } = fakeSupabase({ rpcError: 'denied' });
+    await expect(
+      setArtifactStoragePathRpc(client)('a', 'p'),
+    ).rejects.toThrow(/set_artifact_storage_path RPC failed: denied/);
+  });
+});
+
+describe('supabaseArtifactStorage', () => {
+  it('returns undefined when the client has no .storage (rpc-only fake → no upload)', () => {
+    const { client } = fakeSupabase();
+    expect(supabaseArtifactStorage(client)).toBeUndefined();
+  });
+
+  it('uploads to the artifacts bucket (upsert:false) and surfaces the error field', async () => {
+    const uploads: Array<{ path: string; opts: unknown }> = [];
+    const client: SupabaseRpcClient = {
+      async rpc() { return { data: null, error: null }; },
+      storage: {
+        from(bucket: string) {
+          expect(bucket).toBe('artifacts');
+          return {
+            async upload(path, _body, opts) {
+              uploads.push({ path, opts });
+              return { data: { path }, error: null };
+            },
+          };
+        },
+      },
+    };
+    const storage = supabaseArtifactStorage(client)!;
+    const res = await storage.upload('ws/tk/a/hello.txt', new Uint8Array([1, 2, 3]), {
+      contentType: 'text/plain',
+    });
+    expect(res.error).toBeNull();
+    expect(uploads).toHaveLength(1);
+    expect(uploads[0]!.path).toBe('ws/tk/a/hello.txt');
+    expect(uploads[0]!.opts).toEqual({ contentType: 'text/plain', upsert: false });
   });
 });
 
