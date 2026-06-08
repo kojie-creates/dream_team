@@ -87,6 +87,15 @@ describe('live org graph — orchestrator → coordinator → specialist writes 
     const written = await readFile(join(ws.root, 'out', 'hello.ts'), 'utf8');
     expect(written).toBe('export const x = 1;\n');
 
+    // The child's write — two levels down — is recorded as an artifact row. Its
+    // trace never bubbles into the orchestrator's result, so before per-child
+    // recording this write produced ZERO artifacts. Now runChild records it from
+    // the child's own trace: exactly one append_artifact, 20 bytes, kind 'file'.
+    const artifacts = calls.filter((c) => c.fn === 'append_artifact');
+    expect(artifacts).toHaveLength(1);
+    expect(artifacts[0]!.params.p_bytes).toBe(20); // 'export const x = 1;\n'
+    expect(artifacts[0]!.params.p_kind).toBe('file');
+
     // The whole chain shares ONE trace sink (the RPC emitter), so every tool across
     // all three nested loops persists via append_trace_event. The child loops'
     // events do NOT bubble into the parent's returned traceEvents — the shared sink

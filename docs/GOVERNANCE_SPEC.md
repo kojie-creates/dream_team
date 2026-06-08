@@ -213,9 +213,18 @@ Run = one brief's full execution. Halt = stop, emit failure packet (`scope_excee
 - Net: a normal build run prompts the user only when the agency tries something genuinely consequential.
 
 ### 8.5 Sub-agent grant inheritance
-- A spawned agent's grant = **parent grant ∩ requested grant** — never a superset. No capability the parent lacks, no tier higher than the parent holds.
-- Spawn depth cap = **3**; total agent count bounded by the loop-termination contract (`MAX_ORCHESTRATION_ITERATIONS = 15`).
-- Enforced at the `SPAWN` gate (T2): a request for escalation is `BLOCKED_HARD`.
+
+**Who may spawn.** Only the six **dispatchers** hold `SPAWN` (§4): the Central Orchestrator and the five Coordinators. Every specialist's grant omits `SPAWN`, so the `SPAWN` gate blocks a specialist's spawn as `blocked_scope` before any child is considered. In practice, therefore, *every* spawn is a dispatcher spawn.
+
+**Delegation model (the org-graph rule).** A dispatcher is the org's delegation surface: it confers the **child role's own §4 grant** (`roleGrant(child)`), bounded by the **routing chart** (`gate/org.ts`, `mayRoute`). It is *not* an intersection with the spawner's own caps — Coordinators are intentionally thin (§4: no `W`/`SH`), so a literal `parent ∩ requested` would strangle their children (a Coordinator could never empower a Code Developer to write). The chart, not the spawner's caps, is the bound.
+
+- **No cross-layer reach.** A dispatcher may instantiate only the roles in its chart row: the Orchestrator → the five Coordinators (+ Packager); each Coordinator → its own layer's specialists. A request outside the chart is refused (`out of org chart`) before the child runs.
+- **Invariant.** A child can never exceed the **§4 grant of the role it runs as**. Conferring a downstream role at that role's defined ceiling is delegation, not escalation — the dispatcher gains nothing; it instantiates a bounded role.
+- **Tool surface follows the grant.** A child receives exactly the tools whose capability its grant holds (`tools/registry.ts`, `toolsForRole`). A Coordinator child physically cannot receive `write_file`/`shell`; only `SPAWN`-holders receive `spawn`. This is a second guard behind the gate.
+
+**Escalation guard (retained as defense).** The classic §8.5 rule — child grant = **parent grant ∩ requested grant**, never a superset — still applies to any *non-dispatcher* `SPAWN`-holder (`gate/intersect.ts`): such a spawner narrows literally and can never escalate. Because no specialist holds `SPAWN` today, the escalation path this guards (a specialist minting a more-powerful peer) is unreachable — but the intersection remains the fail-closed default.
+
+**Bounds.** Spawn depth cap = **3**; total agent count bounded by the loop-termination contract (`MAX_ORCHESTRATION_ITERATIONS = 15`). A request past either cap is refused — the child is not run. Enforced at the `SPAWN` gate (T2).
 
 ### 8.6 Connector scope → tier defaults
 Read = T2, write = T1. All connector **writes OFF** by default (per §8.1 posture).

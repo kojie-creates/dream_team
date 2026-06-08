@@ -184,6 +184,14 @@ export interface RunLoopOptions {
    * `runChild` (it re-enters runLoop with the child role/grant + incremented counts).
    */
   spawn?: { depth: number; orchCount: number; runChild: RunChildFn };
+  /**
+   * Shared spend accumulator for the whole spawn tree (Decision 10). The budget
+   * hard-stop ($20) is enforced against this running total, not each loop's own
+   * cost — so N children cannot each spend a fresh $20. The composition root creates
+   * one object and threads it into the top run AND every child run. Absent → this
+   * loop is its own root and tracks only its own cost (single-run behavior unchanged).
+   */
+  treeSpend?: { spentUsd: number };
 }
 
 /**
@@ -225,6 +233,10 @@ export async function runLoop(opts: RunLoopOptions): Promise<RunResult> {
   };
   let iteration = 0;
   let softWarned = false;
+  // Tree-wide spend accumulator (§8.5 budget): shared across the whole spawn tree
+  // when the root threads it in; else this loop is its own root. The hard-stop gates
+  // on this total, not the local `cost` — child + sibling spend all count against $20.
+  const treeSpend = opts.treeSpend ?? { spentUsd: 0 };
   // Latest plan the model set via set_plan — captured into the run result (planner slice).
   let currentPlan: Plan | undefined;
   // Signature of the previous iteration's tool activity (from/to + tool calls +
@@ -257,24 +269,29 @@ export async function runLoop(opts: RunLoopOptions): Promise<RunResult> {
     });
 
     // Step 2: record usage + accumulate cost (ADR Decision 3 step 2, Decision 10).
+    // The cost delta also lands on the shared tree accumulator so the budget gate
+    // sees child + sibling spend, not just this loop's.
+    const costBefore = cost.costUsd;
     accumulateCost(cost, response.usage, MODEL_ID);
+    treeSpend.spentUsd += cost.costUsd - costBefore;
 
     // ── T7 SEAM (post-usage): budget hard-stop (ADR Decision 10). Soft-warn at
-    //    $5 (record once, do NOT halt); hard-stop at $20/run with a
-    //    `scope_exceeded` packet. cost is non-null and = token×price (§4.7). ──
-    if (!softWarned && cost.costUsd >= SOFT_WARN_USD) {
+    //    $5 (record once, do NOT halt); hard-stop at $20 across the spawn TREE with
+    //    a `scope_exceeded` packet. cost is non-null and = token×price (§4.7). For a
+    //    root run with no children, tree spend == this loop's cost. ──
+    if (!softWarned && treeSpend.spentUsd >= SOFT_WARN_USD) {
       softWarned = true;
       // Soft warning: recorded, not a halt (Decision 10). No SPEND tool exists in
       // slice 1, so this is the only non-fatal budget signal.
       console.warn(
-        `runLoop: budget soft-warn — run cost $${cost.costUsd.toFixed(4)} >= $${SOFT_WARN_USD}`,
+        `runLoop: budget soft-warn — tree spend $${treeSpend.spentUsd.toFixed(4)} >= $${SOFT_WARN_USD}`,
       );
     }
-    if (cost.costUsd >= HARD_STOP_USD) {
+    if (treeSpend.spentUsd >= HARD_STOP_USD) {
       return halt(opts, {
         state: 'terminated_budget',
         failureType: 'scope_exceeded',
-        detail: `run token budget exceeded: $${cost.costUsd.toFixed(4)} >= $${HARD_STOP_USD} hard stop`,
+        detail: `tree token budget exceeded: $${treeSpend.spentUsd.toFixed(4)} >= $${HARD_STOP_USD} hard stop`,
         messages,
         iteration,
         cost,

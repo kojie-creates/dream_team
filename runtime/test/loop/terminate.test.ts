@@ -204,6 +204,53 @@ describe('T7 — budget hard-stop ($20/run)', () => {
   });
 });
 
+describe('T7 — budget hard-stop is TREE-wide (§8.5 spawn budget)', () => {
+  it('halts on a small LOCAL spend once the shared tree total crosses $20', async () => {
+    // The tree already spent $18 (parent + earlier children). This loop spends only
+    // $5 (200k out × $25/1e6) — well under $20 on its own — but 18 + 5 = $23 crosses
+    // the cap. Gating on the shared accumulator, not local cost, is what halts it.
+    const treeSpend = { spentUsd: 18 };
+    const small: ModelUsage = { input_tokens: 0, output_tokens: 200_000 }; // $5
+    const tape: Tape = [uniqueWriteTurn(0, small), endTurn()];
+    const { failureSink, opts } = build(tapeModelClient(tape));
+
+    const result = await runLoop({ ...opts, treeSpend });
+
+    expect(result.state).toBe('terminated_budget');
+    expect(failureSink.count()).toBe(1);
+    expect(result.failure!.failure_type).toBe('scope_exceeded');
+    // This loop's OWN cost is only $5 — under $20. The halt came from the tree total.
+    expect(result.cost.costUsd).toBe(5);
+    expect(treeSpend.spentUsd).toBe(23);
+  });
+
+  it('accumulates across sibling loops sharing one accumulator', async () => {
+    const treeSpend = { spentUsd: 0 };
+
+    // Sibling A: $15, completes cleanly. The shared total is now $15.
+    const a = build(tapeModelClient([uniqueWriteTurn(0, { input_tokens: 0, output_tokens: 600_000 }), endTurn()]));
+    const first = await runLoop({ ...a.opts, treeSpend });
+    expect(first.state).toBe('done');
+    expect(treeSpend.spentUsd).toBe(15);
+
+    // Sibling B: $5 alone (would pass), but 15 + 5 = $20 hits the cap → halts.
+    const b = build(tapeModelClient([uniqueWriteTurn(1, { input_tokens: 0, output_tokens: 200_000 }), endTurn()]));
+    const second = await runLoop({ ...b.opts, treeSpend });
+    expect(second.state).toBe('terminated_budget');
+    expect(treeSpend.spentUsd).toBe(20);
+  });
+
+  it('no regression: a root run with no treeSpend gates on its own cost', async () => {
+    // Same $25 single-turn overrun as the per-run test — with no shared accumulator
+    // injected, the loop creates its own root and behaves exactly as before.
+    const tape: Tape = [uniqueWriteTurn(0, { input_tokens: 0, output_tokens: 1_000_000 }), endTurn()];
+    const { opts } = build(tapeModelClient(tape));
+    const result = await runLoop(opts);
+    expect(result.state).toBe('terminated_budget');
+    expect(result.cost.costUsd).toBe(25);
+  });
+});
+
 describe('T7 — no regression: happy path still terminates on end_turn', () => {
   it('a single write + end_turn ends as done, no failure packet, cap does not fire early', async () => {
     const tape: Tape = [uniqueWriteTurn(0), endTurn()];

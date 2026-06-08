@@ -138,6 +138,25 @@ export async function startRun(input: StartRunInput, deps: StartRunDeps): Promis
   });
   const artifactEmitter = sinkArtifactEmitter(artifactSink);
 
+  // Record every permitted write in a loop's trace as an `artifacts` row, gated by
+  // the T9 liveness check (exists + non-empty). Called once per loop result in the
+  // spawn tree — a child's writes live in the CHILD's traceEvents (they do not
+  // bubble into the parent's), so the parent loop alone would miss them. `role` is
+  // the role that performed the writes (the child's role for a child result).
+  const recordWrites = async (events: RunResult['traceEvents'], role: string): Promise<void> => {
+    for (const ev of events) {
+      if (ev.event_type !== 'tool.executed') continue;
+      const p = ev.payload;
+      if (p.verdict === 'pass' && p.tool_name === 'write_file' && p.resolved_path) {
+        await recordArtifactIfLive(
+          { absPath: p.resolved_path, predicate: () => true, kind: kindForPath(p.resolved_path) },
+          { workspaceId: input.workspaceId, ticketId: input.ticketId, role },
+          artifactEmitter,
+        );
+      }
+    }
+  };
+
   // Confinement root is realpath'd ONCE here (the app→confinement seam); the
   // software provider closes over the canonical value (it does not touch disk).
   const confinement =
@@ -148,12 +167,17 @@ export async function startRun(input: StartRunInput, deps: StartRunDeps): Promis
   // run's trace/failure sinks + confinement (the whole chain is one trace). The
   // spawn tool (when present in deps.tools and the role holds SPAWN) calls it; the
   // grant it passes is already parent∩requested, so a child cannot escalate.
+  // One spend accumulator for the whole tree (Decision 10): the top run and every
+  // child share it, so the $20 hard-stop bounds total spend, not per-loop spend.
+  const treeSpend = { spentUsd: 0 };
+
   const runChild: RunChildFn = async (childInput) => {
     const childResult = await runLoop({
       modelClient: deps.modelClient,
       emitter,
       failureEmitter,
       confinement,
+      treeSpend,
       role: childInput.role,
       grant: childInput.grant,
       approvals: input.approvals,
@@ -166,6 +190,11 @@ export async function startRun(input: StartRunInput, deps: StartRunDeps): Promis
       maxTokens: input.maxTokens,
       spawn: { depth: childInput.depth, orchCount: childInput.orchCount, runChild },
     });
+    // Record the child's own writes as artifact rows (its trace does not bubble up).
+    // Only on a clean child `done` — a halted child recorded its FAILURE PACKET.
+    if (childResult.state === 'done') {
+      await recordWrites(childResult.traceEvents, childInput.role);
+    }
     return {
       role: childInput.role,
       state: childResult.state,
@@ -180,6 +209,7 @@ export async function startRun(input: StartRunInput, deps: StartRunDeps): Promis
     emitter,
     failureEmitter,
     confinement,
+    treeSpend,
     role: input.role,
     grant: input.grant,
     approvals: input.approvals,
@@ -190,21 +220,11 @@ export async function startRun(input: StartRunInput, deps: StartRunDeps): Promis
     spawn: { depth: 0, orchCount: 0, runChild },
   });
 
-  // 4 — post-run: record each permitted write as an `artifacts` row, gated by the
-  // T9 liveness check (exists + non-empty). Only on a clean `done` — a halted run
-  // recorded its FAILURE PACKET, not success artifacts.
+  // 4 — post-run: record the TOP run's permitted writes as `artifacts` rows. Child
+  // writes were already recorded inside runChild from each child's own trace. Only
+  // on a clean `done` — a halted run recorded its FAILURE PACKET, not artifacts.
   if (result.state === 'done') {
-    for (const ev of result.traceEvents) {
-      if (ev.event_type !== 'tool.executed') continue;
-      const p = ev.payload;
-      if (p.verdict === 'pass' && p.tool_name === 'write_file' && p.resolved_path) {
-        await recordArtifactIfLive(
-          { absPath: p.resolved_path, predicate: () => true, kind: kindForPath(p.resolved_path) },
-          { workspaceId: input.workspaceId, ticketId: input.ticketId, role: input.role },
-          artifactEmitter,
-        );
-      }
-    }
+    await recordWrites(result.traceEvents, input.role);
   }
 
   // 5 — surface any persistence failure (the seams fire-and-forget). A dropped
