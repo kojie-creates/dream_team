@@ -5,6 +5,7 @@
 import { NextResponse, type NextRequest } from 'next/server';
 import { randomBytes } from 'node:crypto';
 import { createSupabaseServerClient } from '@/lib/supabase/server';
+import { googleCallbackUrl } from '@/lib/connectors/googleOAuth';
 import { env } from '@/env';
 
 const GOOGLE_AUTH_URL = 'https://accounts.google.com/o/oauth2/v2/auth';
@@ -86,7 +87,9 @@ export async function GET(
     n: nonce,
   });
 
-  const redirectUri = `${env.NEXT_PUBLIC_SITE_URL.replace(/\/$/, '')}/w/${workspace.slug}/settings/connectors/google-calendar/callback`;
+  // Product-wide fixed callback (no slug in the path) — the workspace travels in
+  // `state` and is recovered there. One registered redirect URI for all workspaces.
+  const redirectUri = googleCallbackUrl();
 
   const authUrl = new URL(GOOGLE_AUTH_URL);
   authUrl.searchParams.set('client_id', env.GOOGLE_CLIENT_ID);
@@ -103,7 +106,10 @@ export async function GET(
     httpOnly: true,
     secure: origin.startsWith('https://'),
     sameSite: 'lax',
-    path: `/w/${workspace.slug}/settings/connectors`,
+    // Path '/' so the FIXED callback (/api/connectors/google/callback) receives it —
+    // the cookie is set under /w/[slug]/start but read under /api. httpOnly + 10-min
+    // TTL keep it tight despite the wider path.
+    path: '/',
     maxAge: 600, // 10 minutes
   });
   return res;
