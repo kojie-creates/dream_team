@@ -56,8 +56,9 @@ describe('spawn — gated by SPAWN grant', () => {
     expect(calls[0]!.role).toBe('code-developer');
     expect(calls[0]!.depth).toBe(1);
     expect(calls[0]!.orchCount).toBe(1);
-    // build-coordinator ∩ code-developer — thin child (literal §8.5).
-    expect(calls[0]!.grant).toEqual({ MDL: 'T0', R: 'T0', PLAN: 'T0', HO: 'T2' });
+    // Option A: a dispatcher confers the child role’s OWN §4 ceiling (full
+    // code-developer grant), NOT the thin coordinator∩child intersection.
+    expect(calls[0]!.grant).toEqual(roleGrant('code-developer'));
 
     const ev = result.traceEvents.find(
       (e) => e.event_type === 'tool.executed' && e.payload.tool_name === 'spawn',

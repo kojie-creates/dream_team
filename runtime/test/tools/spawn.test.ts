@@ -86,7 +86,36 @@ describe('spawn — refusals (run nothing)', () => {
   });
 });
 
-describe('spawn — happy path', () => {
+describe('spawn — Option A dispatcher delegation (org graph)', () => {
+  it('a coordinator confers the child role’s OWN §4 ceiling (full W/SH), not an intersection', async () => {
+    const { runChild, calls } = recordingRunChild();
+    const obs = await spawnTool.execute(
+      { role: 'code-developer', brief: 'build it' },
+      ctx(spawnSeam({ spawnerRole: 'build-coordinator', spawnerGrant: roleGrant('build-coordinator')!, runChild })),
+    );
+
+    expect(obs.ok).toBe(true);
+    const child = calls[0]!;
+    // The full code-developer §4 grant — the coordinator’s thinness does NOT
+    // strangle the child (this is exactly what literal intersection broke).
+    expect(child.grant).toEqual(roleGrant('code-developer'));
+    expect(child.grant.W).toBe('T3');
+    expect(child.grant.SH).toBe('T2');
+  });
+
+  it('refuses a cross-layer (out-of-chart) child — runChild never runs', async () => {
+    const { runChild, calls } = recordingRunChild();
+    const obs = await spawnTool.execute(
+      { role: 'devops', brief: 'deploy' },
+      ctx(spawnSeam({ spawnerRole: 'research-coordinator', spawnerGrant: roleGrant('research-coordinator')!, runChild })),
+    );
+    expect(obs.ok).toBe(false);
+    expect(obs.summary).toMatch(/out of org chart/);
+    expect(calls).toHaveLength(0);
+  });
+});
+
+describe('spawn — legacy intersection path (non-dispatcher SPAWN-holder, defense)', () => {
   it('runs the child with the INTERSECTED grant + incremented counts', async () => {
     const { runChild, calls } = recordingRunChild();
     const obs = await spawnTool.execute(

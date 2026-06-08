@@ -20,6 +20,7 @@ import type { ToolDef, ToolExecContext, ToolObservation } from './types.ts';
 import type { RoleGrant } from '../gate/types.ts';
 import { roleGrant } from '../gate/grants.ts';
 import { intersectGrants } from '../gate/intersect.ts';
+import { isDispatcher, mayRoute } from '../gate/org.ts';
 
 /** §8.5 spawn-depth cap. */
 export const MAX_SPAWN_DEPTH = 3;
@@ -92,9 +93,24 @@ export const spawnTool: ToolDef<SpawnInput> = {
       return fail('orchestration iteration limit reached');
     }
 
-    // §8.5: child grant = parent ∩ requested. Escalation is impossible — any
-    // capability the spawner lacks is dropped here, silently narrowing the child.
-    const childGrant = intersectGrants(spawn.spawnerGrant, requested);
+    // Option A delegation (org graph). A DISPATCHER (orchestrator/coordinator) is
+    // the org's delegation surface: it confers the child role's OWN §4 ceiling,
+    // bounded by the routing chart (mayRoute) so cross-layer reach is impossible.
+    // Coordinators are intentionally thin (§4: no W/SH), so a literal intersection
+    // would strangle their children — the chart, not the spawner's own caps, is
+    // the bound here. A child can still never exceed the role's matrix grant.
+    //
+    // The legacy §8.5 path (parent ∩ requested) remains as defense for any future
+    // non-dispatcher SPAWN-holder: such a spawner narrows literally, never escalates.
+    let childGrant: RoleGrant;
+    if (isDispatcher(spawn.spawnerRole)) {
+      if (!mayRoute(spawn.spawnerRole, input.role)) {
+        return fail(`'${spawn.spawnerRole}' may not route to '${input.role}' (out of org chart)`);
+      }
+      childGrant = requested;
+    } else {
+      childGrant = intersectGrants(spawn.spawnerGrant, requested);
+    }
 
     const summary = await spawn.runChild({
       role: input.role,

@@ -36,6 +36,7 @@ import {
 } from './db/client.ts';
 import { makeArtifactUploadFn } from './artifacts/upload.ts';
 import type { RunChildFn } from './tools/spawn.ts';
+import { toolsForRole } from './tools/registry.ts';
 import type { SupabaseRpcClient } from './db/client.ts';
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -156,7 +157,10 @@ export async function startRun(input: StartRunInput, deps: StartRunDeps): Promis
       role: childInput.role,
       grant: childInput.grant,
       approvals: input.approvals,
-      tools: deps.tools,
+      // The child's surface is its OWN role's projection (registry), NOT the
+      // parent's tools — a code-developer child gets write_file even though its
+      // coordinator parent never holds it. Governance-faithful per-role surface.
+      tools: toolsForRole(childInput.role),
       system: `You are the ${childInput.role} specialist. ${childInput.brief} Complete it, then stop.`,
       messages: [{ role: 'user', content: childInput.brief }],
       maxTokens: input.maxTokens,
