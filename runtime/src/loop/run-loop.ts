@@ -40,6 +40,7 @@ import { resolveWorkspace } from '../gate/workspace.ts';
 import type { WorkspaceBoundary } from '../gate/workspace.ts';
 import type { ConfinementProvider } from '../confine/provider.ts';
 import type { Plan } from '../tools/plan.ts';
+import type { SpawnContext, RunChildFn } from '../tools/spawn.ts';
 import type { ToolDef, ToolObservation } from '../tools/types.ts';
 import type {
   ContentBlock,
@@ -176,6 +177,13 @@ export interface RunLoopOptions {
   messages: LoopMessage[];
   /** Max output tokens per createMessage call. */
   maxTokens: number;
+  /**
+   * Sub-agent dispatch wiring (§8.5). Present → the spawn tool can launch a child
+   * via `runChild` with this run's depth/orchestration counters threaded in.
+   * Absent → no spawning (the spawn tool refuses). The composition root supplies
+   * `runChild` (it re-enters runLoop with the child role/grant + incremented counts).
+   */
+  spawn?: { depth: number; orchCount: number; runChild: RunChildFn };
 }
 
 /**
@@ -190,6 +198,16 @@ export async function runLoop(opts: RunLoopOptions): Promise<RunResult> {
   const toolsByName = new Map<string, AnyToolDef>(
     opts.tools.map((t) => [t.name, t]),
   );
+  // The spawn seam for this run (§8.5): the spawner identity + caps + child runner.
+  const spawnContext: SpawnContext | undefined = opts.spawn
+    ? {
+        spawnerRole: opts.role,
+        spawnerGrant: opts.grant,
+        depth: opts.spawn.depth,
+        orchCount: opts.spawn.orchCount,
+        runChild: opts.spawn.runChild,
+      }
+    : undefined;
   // Tools surfaced to the model from each ToolDef's static inputSchema (Decision 3).
   const toolSpecs = opts.tools.map((t) => ({
     name: t.name,
@@ -286,7 +304,7 @@ export async function runLoop(opts: RunLoopOptions): Promise<RunResult> {
       for (const block of toolUses) {
         const { observation, decision, resolvedPath } = await handleToolUse(
           block,
-          { boundary, toolsByName, ctx: gateContext(opts, boundary), confine: opts.confinement },
+          { boundary, toolsByName, ctx: gateContext(opts, boundary), confine: opts.confinement, spawn: spawnContext },
         );
 
         // Capture the latest plan from a successful set_plan call into run state.
@@ -470,6 +488,7 @@ interface HandleDeps {
   toolsByName: Map<string, AnyToolDef>;
   ctx: GateContext;
   confine: ConfinementProvider;
+  spawn?: SpawnContext;
 }
 
 /**
@@ -538,6 +557,7 @@ async function handleToolUse(
     const observation = await toolDef.execute(input, {
       boundary: deps.boundary,
       confine: deps.confine,
+      spawn: deps.spawn,
     });
     return { observation, decision, resolvedPath };
   }

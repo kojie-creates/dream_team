@@ -35,6 +35,7 @@ import {
   isWorkspaceMember,
 } from './db/client.ts';
 import { makeArtifactUploadFn } from './artifacts/upload.ts';
+import type { RunChildFn } from './tools/spawn.ts';
 import type { SupabaseRpcClient } from './db/client.ts';
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -141,6 +142,34 @@ export async function startRun(input: StartRunInput, deps: StartRunDeps): Promis
   const confinement =
     deps.confinement ?? softwareConfinement(await realpath(input.workspaceRoot));
 
+  // Sub-agent dispatch (§8.5): the recursive child runner re-enters runLoop with
+  // the child role/grant + incremented depth/orchestration counts, sharing this
+  // run's trace/failure sinks + confinement (the whole chain is one trace). The
+  // spawn tool (when present in deps.tools and the role holds SPAWN) calls it; the
+  // grant it passes is already parent∩requested, so a child cannot escalate.
+  const runChild: RunChildFn = async (childInput) => {
+    const childResult = await runLoop({
+      modelClient: deps.modelClient,
+      emitter,
+      failureEmitter,
+      confinement,
+      role: childInput.role,
+      grant: childInput.grant,
+      approvals: input.approvals,
+      tools: deps.tools,
+      system: `You are the ${childInput.role} specialist. ${childInput.brief} Complete it, then stop.`,
+      messages: [{ role: 'user', content: childInput.brief }],
+      maxTokens: input.maxTokens,
+      spawn: { depth: childInput.depth, orchCount: childInput.orchCount, runChild },
+    });
+    return {
+      role: childInput.role,
+      state: childResult.state,
+      iterations: childResult.iterations,
+      costUsd: childResult.cost.costUsd,
+    };
+  };
+
   // 3 — the governed loop.
   const result = await runLoop({
     modelClient: deps.modelClient,
@@ -154,6 +183,7 @@ export async function startRun(input: StartRunInput, deps: StartRunDeps): Promis
     system: input.system,
     messages: input.messages,
     maxTokens: input.maxTokens,
+    spawn: { depth: 0, orchCount: 0, runChild },
   });
 
   // 4 — post-run: record each permitted write as an `artifacts` row, gated by the

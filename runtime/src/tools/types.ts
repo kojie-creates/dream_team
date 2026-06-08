@@ -17,6 +17,7 @@
 import type { Capability, Tier } from '../gate/types.ts';
 import type { WorkspaceBoundary } from '../gate/workspace.ts';
 import type { ConfinementProvider } from '../confine/provider.ts';
+import type { SpawnContext } from './spawn.ts';
 
 /**
  * Minimal JSON-Schema shape surfaced to the model in `tools[]`. Slice 1 only
@@ -41,6 +42,12 @@ export interface ToolExecContext {
    * test harness) needn't supply it — a shell tool refuses when it is absent.
    */
   confine?: ConfinementProvider;
+  /**
+   * The spawn seam (§8.5). Present when the run permits sub-agent dispatch — the
+   * spawn tool reads the spawner's grant + depth/orchestration counters and the
+   * injected child runner from here. Absent → the spawn tool refuses.
+   */
+  spawn?: SpawnContext;
   /**
    * TEST-ONLY race-window seam (Decision 2a.5). If present, `execute()` awaits it
    * AFTER resolveWorkspace() returns ok but BEFORE opening the handle, so a test

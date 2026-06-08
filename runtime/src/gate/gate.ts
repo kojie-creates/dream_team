@@ -26,7 +26,10 @@ import { approvalKey } from './types.ts';
 // consequence/hard-gated. The STRICTER tier is the one with the higher rank.
 const TIER_RANK: Record<Tier, number> = { T0: 0, T3: 1, T2: 2, T1: 3 };
 
-function stricter(a: Tier, b: Tier): Tier {
+/** The stricter (higher-consequence, more-gated) of two tiers. Shared with the
+ * sub-agent grant intersection (§8.5: a child is gated at least as strictly as
+ * its parent for any shared capability). */
+export function stricterTier(a: Tier, b: Tier): Tier {
   return TIER_RANK[a] >= TIER_RANK[b] ? a : b;
 }
 
@@ -49,7 +52,7 @@ export function gate(action: GateAction, ctx: GateContext): GateDecision {
   }
 
   // §5: effective tier = stricter of (action tier, role's max tier).
-  const effectiveTier = stricter(action.actionTier, grantedMax);
+  const effectiveTier = stricterTier(action.actionTier, grantedMax);
 
   switch (effectiveTier) {
     case 'T0':
