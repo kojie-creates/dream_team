@@ -39,6 +39,7 @@ import type {
 import { resolveWorkspace } from '../gate/workspace.ts';
 import type { WorkspaceBoundary } from '../gate/workspace.ts';
 import type { ConfinementProvider } from '../confine/provider.ts';
+import type { Plan } from '../tools/plan.ts';
 import type { ToolDef, ToolObservation } from '../tools/types.ts';
 import type {
   ContentBlock,
@@ -150,6 +151,8 @@ export interface RunResult {
   traceEvents: TraceEvent[];
   /** The FAILURE PACKET emitted on a halt (Decision 10); undefined on a clean `done`. */
   failure?: FailurePacket;
+  /** The latest plan the run set via set_plan (planner slice); undefined if it never planned. */
+  plan?: Plan;
 }
 
 /** Everything a run needs (the grant is passed AS A PARAMETER — ADR Decision 9). */
@@ -204,6 +207,8 @@ export async function runLoop(opts: RunLoopOptions): Promise<RunResult> {
   };
   let iteration = 0;
   let softWarned = false;
+  // Latest plan the model set via set_plan — captured into the run result (planner slice).
+  let currentPlan: Plan | undefined;
   // Signature of the previous iteration's tool activity (from/to + tool calls +
   // observations), for the loop-detection rule (two consecutive identical → halt).
   let prevSignature: string | null = null;
@@ -221,6 +226,7 @@ export async function runLoop(opts: RunLoopOptions): Promise<RunResult> {
         iteration,
         cost,
         traceEvents,
+        plan: currentPlan,
       });
     }
 
@@ -255,6 +261,7 @@ export async function runLoop(opts: RunLoopOptions): Promise<RunResult> {
         iteration,
         cost,
         traceEvents,
+        plan: currentPlan,
       });
     }
 
@@ -264,7 +271,7 @@ export async function runLoop(opts: RunLoopOptions): Promise<RunResult> {
 
     // Step 4: branch on stop_reason.
     if (response.stop_reason === 'end_turn') {
-      return { state: 'done', messages, iterations: iteration, cost, traceEvents };
+      return { state: 'done', messages, iterations: iteration, cost, traceEvents, plan: currentPlan };
     }
 
     if (response.stop_reason === 'tool_use') {
@@ -281,6 +288,12 @@ export async function runLoop(opts: RunLoopOptions): Promise<RunResult> {
           block,
           { boundary, toolsByName, ctx: gateContext(opts, boundary), confine: opts.confinement },
         );
+
+        // Capture the latest plan from a successful set_plan call into run state.
+        if (block.name === 'set_plan' && observation.ok) {
+          const p = (observation.data as { plan?: Plan } | undefined)?.plan;
+          if (p) currentPlan = p;
+        }
 
         // Step 4c: emit exactly one tool.executed event per tool call (Decision 4;
         // invariant count(tool.executed)==count(tool calls)).
@@ -330,6 +343,7 @@ export async function runLoop(opts: RunLoopOptions): Promise<RunResult> {
           iteration,
           cost,
           traceEvents,
+          plan: currentPlan,
         });
       }
       prevSignature = signature;
@@ -374,6 +388,7 @@ interface HaltArgs {
   iteration: number;
   cost: RunCost;
   traceEvents: TraceEvent[];
+  plan?: Plan;
 }
 
 /**
@@ -419,6 +434,7 @@ function halt(opts: RunLoopOptions, args: HaltArgs): RunResult {
     cost: args.cost,
     traceEvents: args.traceEvents,
     failure: packet,
+    plan: args.plan,
   };
 }
 

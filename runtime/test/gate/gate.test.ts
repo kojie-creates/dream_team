@@ -103,6 +103,11 @@ describe('grants.ts — full §4 matrix', () => {
 
   // Spot-checks pinning the distinctive cells of each layer.
   const spot: Array<[string, Capability, Tier | undefined]> = [
+    // PLAN is universal (T0) — every role can plan (planner slice).
+    ['central-orchestrator', 'PLAN', 'T0'],
+    ['code-developer', 'PLAN', 'T0'],
+    ['truth-agent', 'PLAN', 'T0'],
+    ['distribution-packager', 'PLAN', 'T0'],
     // Coordinators: SPAWN+HO at T2, no filesystem.
     ['central-orchestrator', 'SPAWN', 'T2'],
     ['build-coordinator', 'W', undefined],

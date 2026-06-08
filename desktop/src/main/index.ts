@@ -39,6 +39,7 @@ if (!(globalThis as { WebSocket?: unknown }).WebSocket) {
 import { registerRunStart } from '../../../runtime/src/host/electron-adapter.ts';
 import type { AdapterConfig } from '../../../runtime/src/host/electron-adapter.ts';
 import { writeFileTool } from '../../../runtime/src/tools/write-file.ts';
+import { setPlanTool } from '../../../runtime/src/tools/plan.ts';
 import { roleGrant } from '../../../runtime/src/gate/grants.ts';
 import type { ApprovalSet } from '../../../runtime/src/gate/types.ts';
 
@@ -70,7 +71,7 @@ function adapterConfig(): AdapterConfig {
       return g;
     },
     approvalsFor: () => NO_APPROVALS,
-    tools: [writeFileTool],
+    tools: [writeFileTool, setPlanTool],
     // failureEmitter omitted → the runtime uses the append_packet RPC sink.
     // makeSupabaseClient / makeModelClient omitted → real supabase-js + Anthropic SDK.
   };

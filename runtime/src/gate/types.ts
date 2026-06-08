@@ -27,6 +27,7 @@ export type Capability =
   | 'SPEND' // incur cost beyond model tokens
   | 'COMM' // send external communication
   | 'SPAWN' // instantiate a sub-agent
+  | 'PLAN' // maintain an explicit task plan (internal cognition, T0)
   | 'HO'; // emit a handoff packet
 
 export type GateDecision =

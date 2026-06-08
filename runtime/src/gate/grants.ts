@@ -27,53 +27,53 @@ import type { Capability, RoleGrant, Tier } from './types.ts';
 const MATRIX: Readonly<Record<string, RoleGrant>> = {
   // ── Orchestrator & Coordinators (routing — no execution tools) ──────────────
   // Power is SPAWN + HO, both T2 (assignment is the authorization surface).
-  'central-orchestrator': { MDL: 'T0', R: 'T0', SPAWN: 'T2', HO: 'T2' },
-  'research-coordinator': { MDL: 'T0', R: 'T0', SPAWN: 'T2', HO: 'T2' },
-  'build-coordinator': { MDL: 'T0', R: 'T0', SPAWN: 'T2', HO: 'T2' },
-  'operate-coordinator': { MDL: 'T0', R: 'T0', SPAWN: 'T2', HO: 'T2' },
-  'distribution-coordinator': { MDL: 'T0', R: 'T0', SPAWN: 'T2', HO: 'T2' },
-  'learning-coordinator': { MDL: 'T0', R: 'T0', SPAWN: 'T2', HO: 'T2' }, // HO gated upstream
+  'central-orchestrator': { MDL: 'T0', R: 'T0', PLAN: 'T0', SPAWN: 'T2', HO: 'T2' },
+  'research-coordinator': { MDL: 'T0', R: 'T0', PLAN: 'T0', SPAWN: 'T2', HO: 'T2' },
+  'build-coordinator': { MDL: 'T0', R: 'T0', PLAN: 'T0', SPAWN: 'T2', HO: 'T2' },
+  'operate-coordinator': { MDL: 'T0', R: 'T0', PLAN: 'T0', SPAWN: 'T2', HO: 'T2' },
+  'distribution-coordinator': { MDL: 'T0', R: 'T0', PLAN: 'T0', SPAWN: 'T2', HO: 'T2' },
+  'learning-coordinator': { MDL: 'T0', R: 'T0', PLAN: 'T0', SPAWN: 'T2', HO: 'T2' }, // HO gated upstream
 
   // ── Research Layer (read-and-synthesize — no execution, no external write) ───
   // Browse-to-read sources (NETr), write internal briefs (W), hand off to the
   // Research Coordinator. idea-generator is purely generative → no browse (NETr ✗).
-  'research-analyst': { MDL: 'T0', R: 'T0', W: 'T3', NETr: 'T2', HO: 'T3' }, // briefs
-  'market-intelligence': { MDL: 'T0', R: 'T0', W: 'T3', NETr: 'T2', HO: 'T3' }, // reports
-  'idea-generator': { MDL: 'T0', R: 'T0', W: 'T3', HO: 'T3' }, // concepts (internal only)
-  'knowledge-librarian': { MDL: 'T0', R: 'T0', W: 'T3', NETr: 'T2', HO: 'T3' }, // index
+  'research-analyst': { MDL: 'T0', R: 'T0', PLAN: 'T0', W: 'T3', NETr: 'T2', HO: 'T3' }, // briefs
+  'market-intelligence': { MDL: 'T0', R: 'T0', PLAN: 'T0', W: 'T3', NETr: 'T2', HO: 'T3' }, // reports
+  'idea-generator': { MDL: 'T0', R: 'T0', PLAN: 'T0', W: 'T3', HO: 'T3' }, // concepts (internal only)
+  'knowledge-librarian': { MDL: 'T0', R: 'T0', PLAN: 'T0', W: 'T3', NETr: 'T2', HO: 'T3' }, // index
 
   // ── Build Layer (the primary executors) ─────────────────────────────────────
-  'architect': { MDL: 'T0', R: 'T0', W: 'T3', NETr: 'T2', HO: 'T3' }, // design/ADR
-  'ux-designer': { MDL: 'T0', R: 'T0', W: 'T3', NETr: 'T2', HO: 'T3' }, // design
+  'architect': { MDL: 'T0', R: 'T0', PLAN: 'T0', W: 'T3', NETr: 'T2', HO: 'T3' }, // design/ADR
+  'ux-designer': { MDL: 'T0', R: 'T0', PLAN: 'T0', W: 'T3', NETr: 'T2', HO: 'T3' }, // design
   // code-developer is the heaviest Build actor: scoped writes (T3), DEL/SH/install
   // at T2, no deploy/secrets/external-net-write. (Reviewed verbatim since slice 1.)
-  'code-developer': { MDL: 'T0', R: 'T0', W: 'T3', DEL: 'T2', SH: 'T2', NETr: 'T2', HO: 'T3' },
-  'qa-testing': { MDL: 'T0', R: 'T0', SH: 'T2', HO: 'T3' }, // runs tests; read-only on src
-  'truth-agent': { MDL: 'T0', R: 'T0', W: 'T3', HO: 'T3' }, // verdict/witness only
+  'code-developer': { MDL: 'T0', R: 'T0', PLAN: 'T0', W: 'T3', DEL: 'T2', SH: 'T2', NETr: 'T2', HO: 'T3' },
+  'qa-testing': { MDL: 'T0', R: 'T0', PLAN: 'T0', SH: 'T2', HO: 'T3' }, // runs tests; read-only on src
+  'truth-agent': { MDL: 'T0', R: 'T0', PLAN: 'T0', W: 'T3', HO: 'T3' }, // verdict/witness only
 
   // ── Operate Layer (highest-risk — holds the T1 production-reach caps) ────────
-  'devops': { MDL: 'T0', R: 'T0', W: 'T3', DEL: 'T2', SH: 'T2', NETr: 'T2', NETw: 'T2', CONr: 'T2', CONw: 'T1', SEC: 'T1', DEP: 'T1', SPEND: 'T1', HO: 'T3' },
-  'data-pipeline': { MDL: 'T0', R: 'T0', W: 'T3', DEL: 'T2', SH: 'T2', NETr: 'T2', NETw: 'T2', CONr: 'T2', CONw: 'T1', SEC: 'T2', DEP: 'T2', SPEND: 'T2', HO: 'T3' },
-  'security': { MDL: 'T0', R: 'T0', W: 'T3', SH: 'T2', NETr: 'T2', CONr: 'T2', SEC: 'T1', HO: 'T3' }, // SEC is read-only audit
-  'performance-optimization': { MDL: 'T0', R: 'T0', W: 'T3', SH: 'T2', NETr: 'T2', CONr: 'T2', SPEND: 'T2', HO: 'T3' },
+  'devops': { MDL: 'T0', R: 'T0', PLAN: 'T0', W: 'T3', DEL: 'T2', SH: 'T2', NETr: 'T2', NETw: 'T2', CONr: 'T2', CONw: 'T1', SEC: 'T1', DEP: 'T1', SPEND: 'T1', HO: 'T3' },
+  'data-pipeline': { MDL: 'T0', R: 'T0', PLAN: 'T0', W: 'T3', DEL: 'T2', SH: 'T2', NETr: 'T2', NETw: 'T2', CONr: 'T2', CONw: 'T1', SEC: 'T2', DEP: 'T2', SPEND: 'T2', HO: 'T3' },
+  'security': { MDL: 'T0', R: 'T0', PLAN: 'T0', W: 'T3', SH: 'T2', NETr: 'T2', CONr: 'T2', SEC: 'T1', HO: 'T3' }, // SEC is read-only audit
+  'performance-optimization': { MDL: 'T0', R: 'T0', PLAN: 'T0', W: 'T3', SH: 'T2', NETr: 'T2', CONr: 'T2', SPEND: 'T2', HO: 'T3' },
 
   // ── Distribution Layer (external-communication risk) ─────────────────────────
-  'marketing-strategy': { MDL: 'T0', R: 'T0', W: 'T3', NETr: 'T2', HO: 'T3' }, // plans
-  'content-creation': { MDL: 'T0', R: 'T0', W: 'T3', NETr: 'T2', HO: 'T3' }, // content
-  'sales-enablement': { MDL: 'T0', R: 'T0', W: 'T3', NETr: 'T2', HO: 'T3' }, // collateral
+  'marketing-strategy': { MDL: 'T0', R: 'T0', PLAN: 'T0', W: 'T3', NETr: 'T2', HO: 'T3' }, // plans
+  'content-creation': { MDL: 'T0', R: 'T0', PLAN: 'T0', W: 'T3', NETr: 'T2', HO: 'T3' }, // content
+  'sales-enablement': { MDL: 'T0', R: 'T0', PLAN: 'T0', W: 'T3', NETr: 'T2', HO: 'T3' }, // collateral
   // Only community-manager reaches the outside world; COMM + connector-write are T1.
-  'community-manager': { MDL: 'T0', R: 'T0', W: 'T3', NETr: 'T2', NETw: 'T2', CONr: 'T2', CONw: 'T1', COMM: 'T1', HO: 'T3' },
+  'community-manager': { MDL: 'T0', R: 'T0', PLAN: 'T0', W: 'T3', NETr: 'T2', NETw: 'T2', CONr: 'T2', CONw: 'T1', COMM: 'T1', HO: 'T3' },
 
   // ── Learning Layer (read-and-recommend; every HO gated upstream at T2) ───────
-  'analytics': { MDL: 'T0', R: 'T0', W: 'T3', CONr: 'T2', HO: 'T2' }, // specs; DB read
-  'customer-insight': { MDL: 'T0', R: 'T0', W: 'T3', NETr: 'T2', HO: 'T2' },
+  'analytics': { MDL: 'T0', R: 'T0', PLAN: 'T0', W: 'T3', CONr: 'T2', HO: 'T2' }, // specs; DB read
+  'customer-insight': { MDL: 'T0', R: 'T0', PLAN: 'T0', W: 'T3', NETr: 'T2', HO: 'T2' },
   // experimentation's flag writes are T2 (a narrower write than its T3 spec write);
   // the spec tabulates only the W column here, so the ceiling encoded is W:T3.
-  'experimentation': { MDL: 'T0', R: 'T0', W: 'T3', CONr: 'T2', HO: 'T2' },
-  'strategy-advisor': { MDL: 'T0', R: 'T0', W: 'T3', HO: 'T2' },
+  'experimentation': { MDL: 'T0', R: 'T0', PLAN: 'T0', W: 'T3', CONr: 'T2', HO: 'T2' },
+  'strategy-advisor': { MDL: 'T0', R: 'T0', PLAN: 'T0', W: 'T3', HO: 'T2' },
 
   // ── Packager ─────────────────────────────────────────────────────────────────
-  'distribution-packager': { MDL: 'T0', R: 'T0', W: 'T3', SH: 'T2', HO: 'T3' }, // builds dist/
+  'distribution-packager': { MDL: 'T0', R: 'T0', PLAN: 'T0', W: 'T3', SH: 'T2', HO: 'T3' }, // builds dist/
 };
 
 /**

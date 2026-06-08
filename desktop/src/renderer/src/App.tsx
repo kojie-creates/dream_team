@@ -3,8 +3,10 @@ import { invoke, type KeystoreStatus, type RunPrepResult, type RunStartReply } f
 import { supabase } from './lib/supabase.ts';
 
 const RUN_SYSTEM =
-  'You are the code-developer specialist. Use the write_file tool to create the ' +
-  'requested file(s) inside the workspace, then stop. Do not ask questions.';
+  'You are the code-developer specialist. First call set_plan to break the task into ' +
+  'concrete steps. Then use write_file to create the requested file(s), calling set_plan ' +
+  'again to mark steps done (or revise the plan on failure). Stop when every step is done. ' +
+  'Do not ask questions.';
 
 // E0+E1 shell: secret status, Supabase sign-in (session stored OS-encrypted in main),
 // and the BYOK Anthropic-key form. The run screen (E2) lands next.
