@@ -11,15 +11,21 @@ import { env } from '@/env';
 
 const GOOGLE_AUTH_URL = 'https://accounts.google.com/o/oauth2/v2/auth';
 const NONCE_COOKIE = 'gcal_oauth_nonce';
-const BASE_SCOPES = [
+// One Google consent covers every Google connector the intern uses (one client +
+// one fixed redirect, commit bb8ff6e). The callback stores a connector row per
+// granted provider. calendar.events = create events; gmail.send = send email;
+// drive/sheets readonly = read. These are surfaced as separate connectors so each
+// is governed by its own capability tier.
+const SCOPES = [
   'openid',
   'email',
   'profile',
   'https://www.googleapis.com/auth/calendar.readonly',
+  'https://www.googleapis.com/auth/calendar.events',
+  'https://www.googleapis.com/auth/gmail.send',
+  'https://www.googleapis.com/auth/drive.readonly',
+  'https://www.googleapis.com/auth/spreadsheets.readonly',
 ];
-// Phase 5 T6 — optional bounded write scope. Requested only when caller
-// explicitly opts in via ?write=1. No broader Google scope is ever requested.
-const WRITE_SCOPE = 'https://www.googleapis.com/auth/calendar.events';
 
 export async function GET(
   request: NextRequest,
@@ -28,8 +34,7 @@ export async function GET(
   const { slug } = await params;
   const url = new URL(request.url);
   const origin = url.origin;
-  const wantWrite = url.searchParams.get('write') === '1';
-  const scopes = wantWrite ? [...BASE_SCOPES, WRITE_SCOPE] : BASE_SCOPES;
+  const scopes = SCOPES;
 
   if (!env.GOOGLE_CLIENT_ID || !env.GOOGLE_CLIENT_SECRET) {
     return NextResponse.redirect(

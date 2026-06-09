@@ -130,46 +130,61 @@ export async function GET(request: NextRequest) {
       ? new Date(Date.now() + tokenJson.expires_in * 1000).toISOString()
       : null;
 
+  // One consent grants several Google connectors; the SAME token serves every
+  // granted scope. Store a connector + token row per granted provider so each is
+  // surfaced + governed separately (calendar / gmail / drive / sheets).
+  const has = (s: string) => grantedScopes.some((g) => g.includes(s));
+  const providers: string[] = [];
+  if (has('calendar')) providers.push('google_calendar');
+  if (has('gmail')) providers.push('gmail');
+  if (has('drive')) providers.push('google_drive');
+  if (has('spreadsheets')) providers.push('google_sheets');
+  if (providers.length === 0) providers.push('google_calendar');
+
   // (6) service-role upsert — only reached after auth + workspace check passed
   const admin = createSupabaseServiceRoleClient();
   const nowIso = new Date().toISOString();
+  const encAccess = encryptToken(tokenJson.access_token);
+  const encRefresh = encryptToken(tokenJson.refresh_token ?? null);
 
-  const { data: connectorRow, error: upsertErr } = await admin
-    .from('connectors')
-    .upsert(
+  for (const provider of providers) {
+    const { data: connectorRow, error: upsertErr } = await admin
+      .from('connectors')
+      .upsert(
+        {
+          workspace_id: workspace.id,
+          provider,
+          status: 'connected',
+          scopes: grantedScopes,
+          connected_by: user.id,
+          connected_at: nowIso,
+          last_error: null,
+          updated_at: nowIso,
+        },
+        { onConflict: 'workspace_id,provider' },
+      )
+      .select('id')
+      .single();
+    if (upsertErr || !connectorRow) {
+      return redirectBack(origin, workspace.slug, `Connector upsert failed (${provider}): ${upsertErr?.message ?? 'unknown'}`);
+    }
+
+    const { error: tokenErr } = await admin.from('connector_tokens').upsert(
       {
-        workspace_id: workspace.id,
-        provider: 'google_calendar',
-        status: 'connected',
-        scopes: grantedScopes,
-        connected_by: user.id,
-        connected_at: nowIso,
-        last_error: null,
+        connector_id: connectorRow.id,
+        access_token_encrypted: encAccess,
+        refresh_token_encrypted: encRefresh,
+        expires_at: expiresAt,
+        token_type: tokenJson.token_type ?? null,
+        provider_account_id: accountId,
+        provider_account_email: accountEmail,
         updated_at: nowIso,
       },
-      { onConflict: 'workspace_id,provider' },
-    )
-    .select('id')
-    .single();
-  if (upsertErr || !connectorRow) {
-    return redirectBack(origin, workspace.slug, `Connector upsert failed: ${upsertErr?.message ?? 'unknown'}`);
-  }
-
-  const { error: tokenErr } = await admin.from('connector_tokens').upsert(
-    {
-      connector_id: connectorRow.id,
-      access_token_encrypted: encryptToken(tokenJson.access_token),
-      refresh_token_encrypted: encryptToken(tokenJson.refresh_token ?? null),
-      expires_at: expiresAt,
-      token_type: tokenJson.token_type ?? null,
-      provider_account_id: accountId,
-      provider_account_email: accountEmail,
-      updated_at: nowIso,
-    },
-    { onConflict: 'connector_id' },
-  );
-  if (tokenErr) {
-    return redirectBack(origin, workspace.slug, `Token persist failed: ${tokenErr.message}`);
+      { onConflict: 'connector_id' },
+    );
+    if (tokenErr) {
+      return redirectBack(origin, workspace.slug, `Token persist failed (${provider}): ${tokenErr.message}`);
+    }
   }
 
   const res = redirectBack(origin, workspace.slug);
