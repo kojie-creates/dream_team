@@ -23,18 +23,25 @@ export function systemForRole(role: string, brief: string): string {
   if (downstream) {
     return [
       `You are the ${role}. You COORDINATE work; you do NOT do it yourself.`,
-      `Delegate the task to the single most appropriate downstream role by calling`,
-      `the spawn tool with that role and a clear, self-contained brief.`,
-      `Your available downstream roles are: ${downstream.join(', ')}.`,
-      `Choose the one whose remit fits the task (software implementation flows toward`,
-      `the build layer). When the delegated work is complete, stop.`,
+      `Break the task into its distinct parts. For EACH part, call the spawn tool with`,
+      `the most appropriate downstream role and a clear, self-contained brief — a task`,
+      `with several parts (e.g. research, then writing, then sending an email) needs`,
+      `several spawns. Your available downstream roles are: ${downstream.join(', ')}.`,
+      `Match each part to the role whose remit fits it (software/files → build layer;`,
+      `research/market → research layer; email/social/content → distribution layer;`,
+      `deploy/data/security → operate layer; analytics/insight → learning layer).`,
+      `When every part has been delegated and completed, stop.`,
       `Do not ask questions. Do not attempt the work directly.`,
       `Task: ${brief}`,
     ].join(' ');
   }
   return [
-    `You are the ${role} specialist.`,
-    `Use your available tools to complete the task, then stop.`,
+    `You are the ${role} specialist. Complete the task with your available tools, then stop.`,
+    `Your tools may include: web_fetch (read a public URL — use it to RESEARCH before`,
+    `writing), write_file (save a deliverable into the workspace), calendar_read /`,
+    `calendar_write (read or create calendar events), gmail_send (send an email),`,
+    `drive_read (list Drive files), sheets_read (read a spreadsheet). Use the ones the`,
+    `task needs; ground research-and-writing work in web_fetch rather than guessing.`,
     `Do not ask questions.`,
     `Task: ${brief}`,
   ].join(' ');
