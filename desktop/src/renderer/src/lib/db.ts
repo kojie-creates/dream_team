@@ -86,6 +86,31 @@ export async function listArtifacts(ticketId: string): Promise<Artifact[]> {
   return (data ?? []) as Artifact[];
 }
 
+/**
+ * Subscribe to live changes for one ticket: new trace events, new artifacts, and
+ * status updates. Realtime is RLS-scoped (the socket auth is set on sign-in), so
+ * only rows the user can read arrive. Returns an unsubscribe fn. Requires the tables
+ * to be in the supabase_realtime publication (migration 0014).
+ */
+export function subscribeTicket(ticketId: string, onChange: () => void): () => void {
+  const ch = supabase
+    .channel(`ticket-${ticketId}`)
+    .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'trace_events', filter: `ticket_id=eq.${ticketId}` }, onChange)
+    .on('postgres_changes', { event: '*', schema: 'public', table: 'artifacts', filter: `ticket_id=eq.${ticketId}` }, onChange)
+    .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'tickets', filter: `id=eq.${ticketId}` }, onChange)
+    .subscribe();
+  return () => { void supabase.removeChannel(ch); };
+}
+
+/** Subscribe to any ticket insert/update (the list view). Returns an unsubscribe fn. */
+export function subscribeTickets(onChange: () => void): () => void {
+  const ch = supabase
+    .channel('tickets-list')
+    .on('postgres_changes', { event: '*', schema: 'public', table: 'tickets' }, onChange)
+    .subscribe();
+  return () => { void supabase.removeChannel(ch); };
+}
+
 export async function listConnectors(): Promise<Connector[]> {
   const { data, error } = await supabase
     .from('connectors')

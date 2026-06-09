@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
-import { listTickets, type Ticket } from '../lib/db.ts';
+import { listTickets, subscribeTickets, type Ticket } from '../lib/db.ts';
 import { StatusPill, Card, Spinner, ErrorNote, relTime } from '../components/ui.tsx';
 import { useAuth } from '../lib/auth.tsx';
 
@@ -14,8 +14,9 @@ export function Tickets(): JSX.Element {
     let live = true;
     const load = () => listTickets().then((t) => live && setTickets(t)).catch((e) => live && setErr(String(e.message ?? e)));
     void load();
-    const id = setInterval(load, 4000); // light poll; Realtime replaces this in B4
-    return () => { live = false; clearInterval(id); };
+    const unsub = subscribeTickets(() => void load()); // live (migration 0014)
+    const id = setInterval(load, 20000); // slow fallback
+    return () => { live = false; unsub(); clearInterval(id); };
   }, [ready, status?.hasSession]);
 
   if (ready && !status?.hasSession) return <ErrorNote>Sign in (Settings) to see tickets.</ErrorNote>;

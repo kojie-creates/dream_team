@@ -41,6 +41,7 @@ export function AuthProvider({ children }: { children: ReactNode }): JSX.Element
           access_token: session.accessToken,
           refresh_token: session.refreshToken,
         });
+        supabase.realtime.setAuth(session.accessToken); // RLS-scoped Realtime
         const { data } = await supabase.auth.getUser();
         setSignedInEmail(data.user?.email ?? null);
       }
@@ -60,6 +61,7 @@ export function AuthProvider({ children }: { children: ReactNode }): JSX.Element
       const s = data.session!;
       await invoke('keystore:save-session', JSON.stringify({ accessToken: s.access_token, refreshToken: s.refresh_token }));
       await supabase.auth.setSession({ access_token: s.access_token, refresh_token: s.refresh_token });
+      supabase.realtime.setAuth(s.access_token); // RLS-scoped Realtime
       setSignedInEmail(data.user?.email ?? email.trim());
       await refresh();
     } catch (err) {

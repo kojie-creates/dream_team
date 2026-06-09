@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
-import { getTicket, listTrace, listArtifacts, type Ticket, type TraceEvent, type Artifact } from '../lib/db.ts';
+import { getTicket, listTrace, listArtifacts, subscribeTicket, type Ticket, type TraceEvent, type Artifact } from '../lib/db.ts';
 import { StatusPill, Card, Spinner, ErrorNote, relTime } from '../components/ui.tsx';
 
 /** Compact one-line summary of a trace event payload (tool.executed etc.). */
@@ -46,8 +46,12 @@ export function TicketDetail(): JSX.Element {
       }
     };
     void load();
-    const iv = setInterval(load, 3000); // poll; Realtime replaces in B4
-    return () => { live = false; clearInterval(iv); };
+    // Realtime (migration 0014) pushes new trace events / artifacts / status as the
+    // org graph runs — the dashboard updates instantly. A slow fallback poll covers
+    // a dropped socket or an un-applied publication.
+    const unsub = subscribeTicket(id, () => void load());
+    const iv = setInterval(load, 20000);
+    return () => { live = false; unsub(); clearInterval(iv); };
   }, [id]);
 
   const toolCount = trace.filter((e) => e.event_type === 'tool.executed').length;
