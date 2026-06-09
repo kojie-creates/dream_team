@@ -134,6 +134,20 @@ function registerHostIpc(): void {
     return { ok: true };
   });
 
+  // Return the decrypted user session so the renderer can rehydrate its Supabase
+  // client for RLS reads + Realtime (Phase B). This is the user's OWN JWT (not the
+  // BYOK key, which never leaves main); returning it to the user's own renderer is
+  // acceptable for the single-user desktop. Null when not signed in.
+  ipcMain.handle('auth:get-session', () => {
+    const b = loadSecretBytes('supabase_session');
+    if (!b) return null;
+    try {
+      return JSON.parse(safeStorage.decryptString(b)) as { accessToken: string; refreshToken: string };
+    } catch {
+      return null;
+    }
+  });
+
   // Open a run's output folder in the OS file explorer.
   ipcMain.handle('shell:open-path', async (_e, p: string) => {
     await shell.openPath(p);
