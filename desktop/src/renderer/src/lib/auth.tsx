@@ -1,7 +1,8 @@
-// Auth/session context for the renderer SPA. Holds keystore status, signs the user
-// in (storing the session OS-encrypted in main), and — crucially for Phase B —
-// rehydrates the renderer Supabase client's session on launch (auth:get-session) so
-// RLS reads + Realtime are authenticated as the user.
+// Auth/session context for the renderer SPA. The renderer is the single token-refresh
+// authority: supabase-js (autoRefreshToken) keeps the ~1h access token alive, and the
+// onAuthStateChange listener syncs EVERY session (sign-in + background refresh) back to
+// main's OS-encrypted keystore — so run-prep / run:start always read a fresh token and
+// never hit "JWT expired". main holds the durable copy; this client doesn't persist.
 import { createContext, useContext, useEffect, useState, type ReactNode } from 'react';
 import { invoke, type KeystoreStatus } from './ipc.ts';
 import { supabase } from './supabase.ts';
@@ -11,7 +12,7 @@ interface AuthValue {
   signedInEmail: string | null;
   busy: boolean;
   error: string | null;
-  ready: boolean; // session rehydration attempted
+  ready: boolean;
   refresh(): Promise<void>;
   signIn(email: string, password: string): Promise<void>;
   signOut(): Promise<void>;
@@ -31,7 +32,27 @@ export function AuthProvider({ children }: { children: ReactNode }): JSX.Element
     setStatus(await invoke<KeystoreStatus>('keystore:status'));
   }
 
-  // On launch: load status + rehydrate the Supabase session from main so reads work.
+  // Single refresh authority: every session (initial sign-in, the launch setSession,
+  // and every background TOKEN_REFRESHED) is persisted to main + used for Realtime.
+  useEffect(() => {
+    const { data: sub } = supabase.auth.onAuthStateChange((_event, session) => {
+      if (session?.access_token) {
+        void invoke('keystore:save-session', JSON.stringify({
+          accessToken: session.access_token,
+          refreshToken: session.refresh_token,
+        }));
+        supabase.realtime.setAuth(session.access_token);
+        setSignedInEmail(session.user?.email ?? null);
+      } else {
+        setSignedInEmail(null);
+      }
+    });
+    return () => sub.subscription.unsubscribe();
+  }, []);
+
+  // On launch: load status + rehydrate the session from main. setSession with an
+  // expired access token + a valid refresh token triggers an immediate refresh
+  // (autoRefreshToken), which the listener above syncs back to the keystore.
   useEffect(() => {
     void (async () => {
       await refresh();
@@ -41,9 +62,6 @@ export function AuthProvider({ children }: { children: ReactNode }): JSX.Element
           access_token: session.accessToken,
           refresh_token: session.refreshToken,
         });
-        supabase.realtime.setAuth(session.accessToken); // RLS-scoped Realtime
-        const { data } = await supabase.auth.getUser();
-        setSignedInEmail(data.user?.email ?? null);
       }
       setReady(true);
     })();
@@ -53,16 +71,12 @@ export function AuthProvider({ children }: { children: ReactNode }): JSX.Element
     setBusy(true);
     setError(null);
     try {
-      const { data, error: e } = await supabase.auth.signInWithPassword({ email: email.trim(), password });
+      const { error: e } = await supabase.auth.signInWithPassword({ email: email.trim(), password });
       if (e) {
         setError(e.message);
         return;
       }
-      const s = data.session!;
-      await invoke('keystore:save-session', JSON.stringify({ accessToken: s.access_token, refreshToken: s.refresh_token }));
-      await supabase.auth.setSession({ access_token: s.access_token, refresh_token: s.refresh_token });
-      supabase.realtime.setAuth(s.access_token); // RLS-scoped Realtime
-      setSignedInEmail(data.user?.email ?? email.trim());
+      // The onAuthStateChange listener persists the session; refresh status here.
       await refresh();
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
