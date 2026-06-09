@@ -109,7 +109,7 @@ const DEFAULT_BRIEF =
             approvals: APPROVALS,
             system: systemForRole('central-orchestrator', brief),
             messages: [{ role: 'user', content: brief }],
-            maxTokens: 2048,
+            maxTokens: 8192,
             workspaceRoot: root,
           },
           {
@@ -138,6 +138,6 @@ const DEFAULT_BRIEF =
         await rm(root, { recursive: true, force: true });
       }
     },
-    180_000,
+    420_000,
   );
 });

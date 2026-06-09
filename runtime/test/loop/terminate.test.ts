@@ -204,6 +204,24 @@ describe('T7 — budget hard-stop ($20/run)', () => {
   });
 });
 
+describe('max_tokens — clean halt, not a throw (regression: live intern run)', () => {
+  it('a truncated turn halts terminated_max_tokens with an execution_error packet', async () => {
+    // A real model can stop with `max_tokens` when a long write_file content or prose
+    // answer is truncated. The loop must halt cleanly (not throw) so the run records a
+    // FAILURE PACKET and the operator can raise maxTokens.
+    const tape: Tape = [
+      { content: [{ type: 'text', text: 'truncated answer…' }], stop_reason: 'max_tokens', usage: { input_tokens: 0, output_tokens: 100 } },
+    ];
+    const { failureSink, opts } = build(tapeModelClient(tape));
+
+    const result = await runLoop(opts);
+
+    expect(result.state).toBe('terminated_max_tokens');
+    expect(failureSink.count()).toBe(1);
+    expect(result.failure!.failure_type).toBe('execution_error');
+  });
+});
+
 describe('T7 — budget hard-stop is TREE-wide (§8.5 spawn budget)', () => {
   it('halts on a small LOCAL spend once the shared tree total crosses $20', async () => {
     // The tree already spent $18 (parent + earlier children). This loop spends only

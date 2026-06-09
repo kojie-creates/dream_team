@@ -142,7 +142,8 @@ export type RunState =
   | 'done'
   | 'terminated_iteration_cap'
   | 'terminated_loop_detected'
-  | 'terminated_budget';
+  | 'terminated_budget'
+  | 'terminated_max_tokens';
 
 /** What the loop returns (ADR Decision 3 last bullet). */
 export interface RunResult {
@@ -394,11 +395,27 @@ export async function runLoop(opts: RunLoopOptions): Promise<RunResult> {
       continue;
     }
 
-    // Decision 3 leaves pause_turn / max_tokens out of slice 1. T5 tapes never
-    // produce them; if one appears it is a fixture/contract violation — fail loud
-    // rather than silently spin (the cap that would catch a real one is T7).
+    // max_tokens: the assistant turn was truncated mid-generation (a long write_file
+    // content or prose answer hit maxTokens). A truncated tool_use cannot be executed
+    // safely, so halt cleanly with a FAILURE PACKET rather than throwing — the fix is
+    // to raise maxTokens for the run. The partial turn is already in `messages`.
+    if (response.stop_reason === 'max_tokens') {
+      return halt(opts, {
+        state: 'terminated_max_tokens',
+        failureType: 'execution_error',
+        detail: 'model response truncated at max_tokens — raise maxTokens for this run',
+        messages,
+        iteration,
+        cost,
+        traceEvents,
+        plan: currentPlan,
+      });
+    }
+
+    // Any other stop_reason (e.g. pause_turn from server-side tools we do not use) is
+    // unexpected for this runtime — fail loud rather than silently spin.
     throw new Error(
-      `runLoop: unhandled stop_reason '${response.stop_reason}' (slice-1 tapes use end_turn/tool_use only)`,
+      `runLoop: unhandled stop_reason '${response.stop_reason}'`,
     );
   }
 }

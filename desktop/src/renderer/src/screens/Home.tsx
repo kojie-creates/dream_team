@@ -27,7 +27,7 @@ export function Home(): JSX.Element {
         ticketId: prep.ticketId,
         role: ENTRY_ROLE,
         messages: [{ role: 'user', content: brief }],
-        maxTokens: 2048,
+        maxTokens: 8192,
         workspaceRoot: prep.workspaceRoot,
       });
       if (reply.ok) {
