@@ -6,6 +6,7 @@ import { NextResponse, type NextRequest } from 'next/server';
 import { randomBytes } from 'node:crypto';
 import { createSupabaseServerClient } from '@/lib/supabase/server';
 import { googleCallbackUrl } from '@/lib/connectors/googleOAuth';
+import { signState } from '@/lib/connectors/oauthState';
 import { env } from '@/env';
 
 const GOOGLE_AUTH_URL = 'https://accounts.google.com/o/oauth2/v2/auth';
@@ -19,14 +20,6 @@ const BASE_SCOPES = [
 // Phase 5 T6 — optional bounded write scope. Requested only when caller
 // explicitly opts in via ?write=1. No broader Google scope is ever requested.
 const WRITE_SCOPE = 'https://www.googleapis.com/auth/calendar.events';
-
-function b64urlJson(obj: unknown): string {
-  return Buffer.from(JSON.stringify(obj), 'utf8')
-    .toString('base64')
-    .replace(/\+/g, '-')
-    .replace(/\//g, '_')
-    .replace(/=+$/g, '');
-}
 
 export async function GET(
   request: NextRequest,
@@ -80,7 +73,9 @@ export async function GET(
   }
 
   const nonce = randomBytes(24).toString('base64url');
-  const state = b64urlJson({
+  // HMAC-signed state — a tampered payload is rejected at the callback before any
+  // DB work. The nonce is also set as an httpOnly cookie below (browser binding).
+  const state = signState({
     s: workspace.slug,
     w: workspace.id,
     p: 'google_calendar',

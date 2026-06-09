@@ -15,40 +15,12 @@ import { createSupabaseServerClient } from '@/lib/supabase/server';
 import { createSupabaseServiceRoleClient } from '@/lib/supabase/service';
 import { encryptToken } from '@/lib/connectors/tokenVault';
 import { googleCallbackUrl } from '@/lib/connectors/googleOAuth';
+import { verifyState } from '@/lib/connectors/oauthState';
 import { env } from '@/env';
 
 const GOOGLE_TOKEN_URL = 'https://oauth2.googleapis.com/token';
 const GOOGLE_USERINFO_URL = 'https://openidconnect.googleapis.com/v1/userinfo';
 const NONCE_COOKIE = 'gcal_oauth_nonce';
-
-type StatePayload = {
-  s: string;
-  w: string;
-  p: string;
-  n: string;
-};
-
-function parseState(raw: string): StatePayload | null {
-  try {
-    const padded = raw + '='.repeat((4 - (raw.length % 4)) % 4);
-    const json = Buffer.from(
-      padded.replace(/-/g, '+').replace(/_/g, '/'),
-      'base64',
-    ).toString('utf8');
-    const obj = JSON.parse(json) as Partial<StatePayload>;
-    if (
-      typeof obj.s !== 'string' ||
-      typeof obj.w !== 'string' ||
-      typeof obj.p !== 'string' ||
-      typeof obj.n !== 'string'
-    ) {
-      return null;
-    }
-    return obj as StatePayload;
-  } catch {
-    return null;
-  }
-}
 
 function redirectBack(origin: string, slug: string, error?: string) {
   const url = new URL(`/w/${slug}/settings/connectors`, origin);
@@ -63,8 +35,10 @@ export async function GET(request: NextRequest) {
   const stateRaw = url.searchParams.get('state');
   const providerError = url.searchParams.get('error');
 
-  // Parse state first — the slug for any redirect is derived from it (no URL slug).
-  const state = stateRaw ? parseState(stateRaw) : null;
+  // Verify + parse state first — the signature is checked before anything else, and
+  // the slug for any redirect is derived from it (no URL slug). A tampered or
+  // unsigned state fails here and never reaches the DB.
+  const state = stateRaw ? verifyState(stateRaw) : null;
   const slug = state?.s ?? null;
   // When state is unreadable we have no workspace to return to; fall back to root.
   const fail = (error: string) =>
