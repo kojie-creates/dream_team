@@ -201,7 +201,8 @@ function adapterConfig(
     loadEncryptedSession: () => Buffer.from(JSON.stringify(session)),
     grantFor: () => devGrant(),
     approvalsFor: () => NO_APPROVALS,
-    tools: [writeFileTool],
+    toolsFor: () => [writeFileTool],
+    systemFor: () => 'You are the code-developer specialist.',
     failureEmitter: sinkFailureEmitter(new InMemoryFailureSink()),
     makeSupabaseClient: async () => supabase, // injected — no network/SDK
     makeModelClient: () => modelClient,
@@ -212,7 +213,6 @@ const req: RunStartRequest = {
   workspaceId: 'ws-uuid',
   ticketId: 'tk-uuid',
   role: 'code-developer',
-  system: 'You are the code-developer specialist.',
   messages: [{ role: 'user', content: 'Write out/hello.ts' }],
   maxTokens: 1024,
   workspaceRoot: '', // set per-test to ws.root

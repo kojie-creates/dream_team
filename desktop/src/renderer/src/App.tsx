@@ -2,11 +2,10 @@ import { useEffect, useState } from 'react';
 import { invoke, type KeystoreStatus, type RunPrepResult, type RunStartReply } from './lib/ipc.ts';
 import { supabase } from './lib/supabase.ts';
 
-const RUN_SYSTEM =
-  'You are the code-developer specialist. First call set_plan to break the task into ' +
-  'concrete steps. Then use write_file to create the requested file(s), calling set_plan ' +
-  'again to mark steps done (or revise the plan on failure). Stop when every step is done. ' +
-  'Do not ask questions.';
+// The run enters at the orchestrator; the host derives the role's tools + prompt and
+// the governed loop spawns down the org chart (orchestrator → coordinator →
+// specialist). The renderer sends only the role + brief.
+const ENTRY_ROLE = 'central-orchestrator';
 
 // E0+E1 shell: secret status, Supabase sign-in (session stored OS-encrypted in main),
 // and the BYOK Anthropic-key form. The run screen (E2) lands next.
@@ -81,8 +80,7 @@ export function App(): JSX.Element {
       const reply = await invoke<RunStartReply>('run:start', {
         workspaceId: prep.workspaceId,
         ticketId: prep.ticketId,
-        role: 'code-developer',
-        system: RUN_SYSTEM,
+        role: ENTRY_ROLE,
         messages: [{ role: 'user', content: brief }],
         maxTokens: 2048,
         workspaceRoot: prep.workspaceRoot,

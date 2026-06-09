@@ -41,12 +41,16 @@ export interface SafeStorageLike {
   decryptString(encrypted: Buffer): string;
 }
 
-/** The renderer's `run:start` payload (request-specific run parameters). */
+/**
+ * The renderer's `run:start` payload (request-specific run parameters). The system
+ * prompt is NOT sent by the renderer — it is derived from the role by the host
+ * (config.systemFor), so the prompt always matches the role's behavior (a dispatcher
+ * delegates, a specialist executes). The brief travels in `messages`.
+ */
 export interface RunStartRequest {
   workspaceId: string;
   ticketId: string;
   role: string;
-  system: string;
   messages: LoopMessage[];
   maxTokens: number;
   workspaceRoot: string;
@@ -72,8 +76,15 @@ export interface AdapterConfig {
   grantFor(role: string): RoleGrant;
   /** Standing + per-action approvals for this request (T1 actions). */
   approvalsFor(req: RunStartRequest): ApprovalSet;
-  /** Tools surfaced to the model. Production slice-1: [writeFileTool]. */
-  tools: AnyToolDef[];
+  /**
+   * The tools surfaced for a role — the role's own §4 surface (toolsForRole). This
+   * is the ENTRY surface; a spawned child gets its own role's surface inside the
+   * loop. A dispatcher (orchestrator/coordinator) gets [set_plan, spawn]; a
+   * specialist gets its execution tools.
+   */
+  toolsFor(role: string): AnyToolDef[];
+  /** The role-appropriate system prompt (systemForRole): dispatcher delegates, specialist executes. */
+  systemFor(role: string, brief: string): string;
   /**
    * Optional failure-packet persistence override. When omitted, startRun builds the
    * RPC-backed sink (append_packet) so halts persist as `packets` rows under RLS.
@@ -114,10 +125,15 @@ export function registerRunStart(
       const supabase = await makeSupabaseClient(config.supabase, session);
       const modelClient = makeModelClient(apiKey);
 
+      // The entry surface + prompt are derived from the role (not sent by the
+      // renderer), so they always match the role's governance + behavior.
+      const first = req.messages[0];
+      const brief = first && typeof first.content === 'string' ? first.content : '';
+
       const deps: StartRunDeps = {
         supabase,
         modelClient,
-        tools: config.tools,
+        tools: config.toolsFor(req.role),
         ...(config.failureEmitter ? { failureEmitter: config.failureEmitter } : {}),
       };
 
@@ -128,7 +144,7 @@ export function registerRunStart(
           role: req.role,
           grant: config.grantFor(req.role),
           approvals: config.approvalsFor(req),
-          system: req.system,
+          system: config.systemFor(req.role, brief),
           messages: req.messages,
           maxTokens: req.maxTokens,
           workspaceRoot: req.workspaceRoot,

@@ -38,8 +38,8 @@ if (!(globalThis as { WebSocket?: unknown }).WebSocket) {
 
 import { registerRunStart } from '../../../runtime/src/host/electron-adapter.ts';
 import type { AdapterConfig } from '../../../runtime/src/host/electron-adapter.ts';
-import { writeFileTool } from '../../../runtime/src/tools/write-file.ts';
-import { setPlanTool } from '../../../runtime/src/tools/plan.ts';
+import { toolsForRole } from '../../../runtime/src/tools/registry.ts';
+import { systemForRole } from '../../../runtime/src/prompts.ts';
 import { roleGrant } from '../../../runtime/src/gate/grants.ts';
 import type { ApprovalSet } from '../../../runtime/src/gate/types.ts';
 
@@ -71,7 +71,11 @@ function adapterConfig(): AdapterConfig {
       return g;
     },
     approvalsFor: () => NO_APPROVALS,
-    tools: [writeFileTool, setPlanTool],
+    // Role-derived surface + prompt: the entry role gets its own §4 tools, and a
+    // dispatcher delegates while a specialist executes. The full org graph runs
+    // when the entry role is central-orchestrator (the renderer's default).
+    toolsFor: toolsForRole,
+    systemFor: systemForRole,
     // failureEmitter omitted → the runtime uses the append_packet RPC sink.
     // makeSupabaseClient / makeModelClient omitted → real supabase-js + Anthropic SDK.
   };
