@@ -51,8 +51,34 @@ const dir = __dirname;
 
 const NO_APPROVALS: ApprovalSet = { standing: new Set(), perAction: new Set() };
 
-/** The adapter config: public Supabase + secret loaders + slice-1 grants/tools. */
+// Phase A interim T1 approval: a standing grant for connector writes + external
+// comms so calendar_write / gmail_send aren't hard-blocked during the intern demo.
+// The real per-action Allow-Once/Session prompt is Phase C. (approvalKey for a
+// path-less tool is `<CAP>:*`.)
+const CONNECTOR_APPROVALS: ApprovalSet = {
+  standing: new Set(['CONw', 'COMM']),
+  perAction: new Set(['CONw:*', 'COMM:*']),
+};
+
+/**
+ * Connector secrets (Phase A) from the process env. Built only when all three are
+ * present; otherwise the calendar/gmail tools refuse (fail-closed). The durable
+ * keystore + Settings UI for these lands in Phase B; for the dev/operator smoke,
+ * launch with CONNECTOR_TOKEN_ENCRYPTION_KEY / GOOGLE_CLIENT_ID / GOOGLE_CLIENT_SECRET set.
+ */
+function connectorConfigFromEnv() {
+  const encryptionKeyHex = process.env.CONNECTOR_TOKEN_ENCRYPTION_KEY;
+  const googleClientId = process.env.GOOGLE_CLIENT_ID;
+  const googleClientSecret = process.env.GOOGLE_CLIENT_SECRET;
+  if (encryptionKeyHex && googleClientId && googleClientSecret) {
+    return { encryptionKeyHex, googleClientId, googleClientSecret };
+  }
+  return undefined;
+}
+
+/** The adapter config: public Supabase + secret loaders + role-derived tools/prompts. */
 function adapterConfig(): AdapterConfig {
+  const connectorConfig = connectorConfigFromEnv();
   return {
     supabase: { url: SUPABASE_URL, anonKey: SUPABASE_ANON_KEY },
     loadEncryptedAnthropicKey: () => {
@@ -70,12 +96,14 @@ function adapterConfig(): AdapterConfig {
       if (!g) throw new Error(`no capability grant for role: ${role}`);
       return g;
     },
-    approvalsFor: () => NO_APPROVALS,
+    // Standing connector-write approval only when connectors are configured.
+    approvalsFor: () => (connectorConfig ? CONNECTOR_APPROVALS : NO_APPROVALS),
     // Role-derived surface + prompt: the entry role gets its own §4 tools, and a
     // dispatcher delegates while a specialist executes. The full org graph runs
     // when the entry role is central-orchestrator (the renderer's default).
     toolsFor: toolsForRole,
     systemFor: systemForRole,
+    ...(connectorConfig ? { connectorConfig } : {}),
     // failureEmitter omitted → the runtime uses the append_packet RPC sink.
     // makeSupabaseClient / makeModelClient omitted → real supabase-js + Anthropic SDK.
   };

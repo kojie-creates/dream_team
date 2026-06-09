@@ -13,6 +13,7 @@ import {
   setArtifactStoragePathRpc,
   supabaseArtifactStorage,
   isWorkspaceMember,
+  getConnectorTokenRpc,
 } from '../../src/db/client.ts';
 import type { CreateClientFn, SupabaseRpcClient } from '../../src/db/client.ts';
 
@@ -36,6 +37,28 @@ function fakeSupabase(opts: { member?: boolean; rpcError?: string } = {}) {
   };
   return { client, calls };
 }
+
+describe('getConnectorTokenRpc', () => {
+  function client(result: { data: unknown; error: { message: string } | null }): SupabaseRpcClient {
+    return { async rpc() { return result; } };
+  }
+
+  it('maps the first returned row', async () => {
+    const row = { connector_id: 'c1', status: 'connected', access_token_encrypted: 'v1:..', refresh_token_encrypted: null, expires_at: null, token_type: 'Bearer' };
+    const fetch = getConnectorTokenRpc(client({ data: [row], error: null }));
+    expect(await fetch('ws', 'google_calendar')).toEqual(row);
+  });
+
+  it('returns null when no row (not connected)', async () => {
+    const fetch = getConnectorTokenRpc(client({ data: null, error: null }));
+    expect(await fetch('ws', 'gmail')).toBeNull();
+  });
+
+  it('throws on an RPC error', async () => {
+    const fetch = getConnectorTokenRpc(client({ data: null, error: { message: 'not a member' } }));
+    await expect(fetch('ws', 'gmail')).rejects.toThrow(/get_connector_token RPC failed/);
+  });
+});
 
 describe('createUserSessionClient', () => {
   it('uses the anon key + the user JWT as bearer — no service-role credential', async () => {

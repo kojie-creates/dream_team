@@ -12,8 +12,8 @@ function names(role: string): string[] {
 }
 
 describe('toolsForRole — surface derived from the grant', () => {
-  it('code-developer gets write_file, shell, set_plan — but NOT spawn', () => {
-    expect(names('code-developer')).toEqual(['set_plan', 'shell', 'write_file']);
+  it('code-developer gets write_file, shell, set_plan, web_fetch (NETr) — but NOT spawn', () => {
+    expect(names('code-developer')).toEqual(['set_plan', 'shell', 'web_fetch', 'write_file']);
   });
 
   it('a dispatcher (build-coordinator) gets spawn + set_plan — but NOT write_file/shell', () => {
@@ -32,6 +32,28 @@ describe('toolsForRole — surface derived from the grant', () => {
     for (const role of ['architect', 'devops', 'analytics', 'community-manager']) {
       expect(names(role)).toContain('set_plan');
     }
+  });
+});
+
+describe('toolsForRole — Phase A capability tools auto-surface by grant', () => {
+  it('web_fetch (NETr) reaches research-analyst but NOT idea-generator', () => {
+    expect(names('research-analyst')).toContain('web_fetch');
+    expect(names('idea-generator')).not.toContain('web_fetch'); // idea-generator has no NETr
+  });
+
+  it('calendar_read (CONr) reaches analytics', () => {
+    expect(names('analytics')).toContain('calendar_read');
+  });
+
+  it('community-manager gets the full external set: web_fetch, calendar_read/write, gmail_send', () => {
+    const cm = names('community-manager');
+    expect(cm).toEqual(expect.arrayContaining(['web_fetch', 'calendar_read', 'calendar_write', 'gmail_send']));
+  });
+
+  it('a role without CONw/COMM does not get calendar_write/gmail_send', () => {
+    const dev = names('code-developer'); // has NETr but not CONw/COMM
+    expect(dev).not.toContain('calendar_write');
+    expect(dev).not.toContain('gmail_send');
   });
 });
 

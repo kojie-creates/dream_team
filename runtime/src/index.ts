@@ -38,6 +38,7 @@ import { makeArtifactUploadFn } from './artifacts/upload.ts';
 import type { RunChildFn } from './tools/spawn.ts';
 import { toolsForRole } from './tools/registry.ts';
 import { systemForRole } from './prompts.ts';
+import { makeConnectorAccess, type ConnectorConfig } from './connectors/google.ts';
 import type { SupabaseRpcClient } from './db/client.ts';
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -86,6 +87,13 @@ export interface StartRunDeps {
   failureEmitter?: FailurePacketEmitter;
   /** Confinement override (tests); defaults to software confinement over the realpath'd root. */
   confinement?: ConfinementProvider;
+  /**
+   * Connector secrets (Phase A). When present, the runtime builds a workspace-bound
+   * ConnectorAccess so the calendar/gmail tools can act on the user's behalf (token
+   * read via get_connector_token RPC + decrypt with the connector key). Absent →
+   * those tools refuse. web_fetch needs nothing here.
+   */
+  connectorConfig?: ConnectorConfig;
 }
 
 /**
@@ -163,6 +171,13 @@ export async function startRun(input: StartRunInput, deps: StartRunDeps): Promis
   const confinement =
     deps.confinement ?? softwareConfinement(await realpath(input.workspaceRoot));
 
+  // Connector access (Phase A) — workspace-bound, shared by the top run and every
+  // child (they act in the same workspace). Built only when the host injected the
+  // connector secrets; otherwise the calendar/gmail tools refuse (fail-closed).
+  const connectors = deps.connectorConfig
+    ? makeConnectorAccess(deps.supabase, deps.connectorConfig, input.workspaceId)
+    : undefined;
+
   // Sub-agent dispatch (§8.5): the recursive child runner re-enters runLoop with
   // the child role/grant + incremented depth/orchestration counts, sharing this
   // run's trace/failure sinks + confinement (the whole chain is one trace). The
@@ -178,6 +193,7 @@ export async function startRun(input: StartRunInput, deps: StartRunDeps): Promis
       emitter,
       failureEmitter,
       confinement,
+      connectors,
       treeSpend,
       role: childInput.role,
       grant: childInput.grant,
@@ -213,6 +229,7 @@ export async function startRun(input: StartRunInput, deps: StartRunDeps): Promis
     emitter,
     failureEmitter,
     confinement,
+    connectors,
     treeSpend,
     role: input.role,
     grant: input.grant,

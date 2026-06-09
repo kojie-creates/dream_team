@@ -15,6 +15,7 @@
 
 import { startRun, WorkspaceMembershipError } from '../index.ts';
 import type { StartRunDeps } from '../index.ts';
+import type { ConnectorConfig } from '../connectors/google.ts';
 import type { ApprovalSet, RoleGrant } from '../gate/types.ts';
 import type { ToolDef } from '../tools/types.ts';
 import type { FailurePacketEmitter } from '../packets/failure.ts';
@@ -86,6 +87,12 @@ export interface AdapterConfig {
   /** The role-appropriate system prompt (systemForRole): dispatcher delegates, specialist executes. */
   systemFor(role: string, brief: string): string;
   /**
+   * Connector secrets (Phase A) — the connector encryption key + Google client
+   * id/secret, decrypted in main. When present, the runtime can resolve connector
+   * tokens so calendar/gmail tools work. Absent → those tools refuse.
+   */
+  connectorConfig?: ConnectorConfig;
+  /**
    * Optional failure-packet persistence override. When omitted, startRun builds the
    * RPC-backed sink (append_packet) so halts persist as `packets` rows under RLS.
    */
@@ -135,6 +142,7 @@ export function registerRunStart(
         modelClient,
         tools: config.toolsFor(req.role),
         ...(config.failureEmitter ? { failureEmitter: config.failureEmitter } : {}),
+        ...(config.connectorConfig ? { connectorConfig: config.connectorConfig } : {}),
       };
 
       const result = await startRun(

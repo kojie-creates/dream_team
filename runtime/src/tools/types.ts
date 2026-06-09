@@ -18,6 +18,7 @@ import type { Capability, Tier } from '../gate/types.ts';
 import type { WorkspaceBoundary } from '../gate/workspace.ts';
 import type { ConfinementProvider } from '../confine/provider.ts';
 import type { SpawnContext } from './spawn.ts';
+import type { ConnectorAccess } from '../connectors/google.ts';
 
 /**
  * Minimal JSON-Schema shape surfaced to the model in `tools[]`. Slice 1 only
@@ -48,6 +49,13 @@ export interface ToolExecContext {
    * injected child runner from here. Absent → the spawn tool refuses.
    */
   spawn?: SpawnContext;
+  /**
+   * Connector access (Phase A) — pre-bound to the run's workspace. Present when the
+   * host injected connectorConfig; the calendar/gmail tools call `connectors
+   * .googleToken(provider)` to act on the user's behalf. Absent → those tools refuse
+   * (fail-closed, like shell without `confine`). web_fetch does NOT need it.
+   */
+  connectors?: ConnectorAccess;
   /**
    * TEST-ONLY race-window seam (Decision 2a.5). If present, `execute()` awaits it
    * AFTER resolveWorkspace() returns ok but BEFORE opening the handle, so a test

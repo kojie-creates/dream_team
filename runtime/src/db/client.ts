@@ -169,6 +169,42 @@ export function setArtifactStoragePathRpc(client: SupabaseRpcClient): SetStorage
   };
 }
 
+/** One row of `get_connector_token` (migration 0013) — ENCRYPTED token material. */
+export interface ConnectorTokenRow {
+  connector_id: string;
+  status: string;
+  access_token_encrypted: string | null;
+  refresh_token_encrypted: string | null;
+  expires_at: string | null;
+  token_type: string | null;
+}
+
+/** Fetches a workspace's encrypted connector token AS the user (RPC `get_connector_token`). */
+export type GetConnectorTokenRpc = (
+  workspaceId: string,
+  provider: string,
+) => Promise<ConnectorTokenRow | null>;
+
+/**
+ * Wrap a user-session client into a `GetConnectorTokenRpc` (migration 0013). The
+ * SECURITY DEFINER RPC enforces auth.uid() + membership and returns ENCRYPTED token
+ * material; decryption happens in the runtime connector module, never here. Returns
+ * null when the workspace has no row for that provider (not connected).
+ */
+export function getConnectorTokenRpc(client: SupabaseRpcClient): GetConnectorTokenRpc {
+  return async (workspaceId, provider) => {
+    const { data, error } = await client.rpc('get_connector_token', {
+      p_workspace_id: workspaceId,
+      p_provider: provider,
+    });
+    if (error) {
+      throw new Error(`get_connector_token RPC failed: ${error.message}`);
+    }
+    const row = (Array.isArray(data) ? data[0] : data) as ConnectorTokenRow | undefined;
+    return row ?? null;
+  };
+}
+
 /**
  * Adapt the real client's Storage surface into the runtime's `ArtifactStorage`
  * seam (uploads to the private `artifacts` bucket, migration 0012). Returns

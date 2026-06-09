@@ -16,6 +16,9 @@ import { setPlanTool } from './plan.ts';
 import { writeFileTool } from './write-file.ts';
 import { shellTool } from './shell.ts';
 import { spawnTool } from './spawn.ts';
+import { webFetchTool } from './web-fetch.ts';
+import { calendarReadTool, calendarWriteTool } from './calendar.ts';
+import { gmailSendTool } from './gmail.ts';
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type AnyToolDef = ToolDef<any>;
@@ -29,6 +32,11 @@ export const ALL_TOOLS: readonly AnyToolDef[] = [
   writeFileTool,
   shellTool,
   spawnTool,
+  // Phase A capability tools — auto-surface by capability:
+  webFetchTool, // NETr → research/content roles
+  calendarReadTool, // CONr
+  calendarWriteTool, // CONw
+  gmailSendTool, // COMM → community-manager (external email)
 ];
 
 /**

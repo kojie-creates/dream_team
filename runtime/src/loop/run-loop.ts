@@ -41,6 +41,7 @@ import type { WorkspaceBoundary } from '../gate/workspace.ts';
 import type { ConfinementProvider } from '../confine/provider.ts';
 import type { Plan } from '../tools/plan.ts';
 import type { SpawnContext, RunChildFn } from '../tools/spawn.ts';
+import type { ConnectorAccess } from '../connectors/google.ts';
 import type { ToolDef, ToolObservation } from '../tools/types.ts';
 import type {
   ContentBlock,
@@ -185,6 +186,12 @@ export interface RunLoopOptions {
    */
   spawn?: { depth: number; orchCount: number; runChild: RunChildFn };
   /**
+   * Connector access (Phase A) — pre-bound to the run's workspace. Threaded into
+   * each tool's ctx so the calendar/gmail tools can act on the user's behalf. Absent
+   * → those tools refuse. web_fetch needs no connectors.
+   */
+  connectors?: ConnectorAccess;
+  /**
    * Shared spend accumulator for the whole spawn tree (Decision 10). The budget
    * hard-stop ($20) is enforced against this running total, not each loop's own
    * cost — so N children cannot each spend a fresh $20. The composition root creates
@@ -321,7 +328,7 @@ export async function runLoop(opts: RunLoopOptions): Promise<RunResult> {
       for (const block of toolUses) {
         const { observation, decision, resolvedPath } = await handleToolUse(
           block,
-          { boundary, toolsByName, ctx: gateContext(opts, boundary), confine: opts.confinement, spawn: spawnContext },
+          { boundary, toolsByName, ctx: gateContext(opts, boundary), confine: opts.confinement, spawn: spawnContext, connectors: opts.connectors },
         );
 
         // Capture the latest plan from a successful set_plan call into run state.
@@ -506,6 +513,7 @@ interface HandleDeps {
   ctx: GateContext;
   confine: ConfinementProvider;
   spawn?: SpawnContext;
+  connectors?: ConnectorAccess;
 }
 
 /**
@@ -575,6 +583,7 @@ async function handleToolUse(
       boundary: deps.boundary,
       confine: deps.confine,
       spawn: deps.spawn,
+      connectors: deps.connectors,
     });
     return { observation, decision, resolvedPath };
   }
