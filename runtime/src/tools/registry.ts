@@ -19,6 +19,8 @@ import { spawnTool } from './spawn.ts';
 import { webFetchTool } from './web-fetch.ts';
 import { calendarReadTool, calendarWriteTool } from './calendar.ts';
 import { gmailSendTool } from './gmail.ts';
+import { driveReadTool } from './drive.ts';
+import { sheetsReadTool } from './sheets.ts';
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type AnyToolDef = ToolDef<any>;
@@ -37,6 +39,8 @@ export const ALL_TOOLS: readonly AnyToolDef[] = [
   calendarReadTool, // CONr
   calendarWriteTool, // CONw
   gmailSendTool, // COMM → community-manager (external email)
+  driveReadTool, // CONr → Google Drive metadata
+  sheetsReadTool, // CONr → Google Sheets values
 ];
 
 /**

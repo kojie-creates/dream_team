@@ -53,3 +53,7 @@ there is no connector beyond these six without an explicit scope change.
 
 ## Progress
 - 2026-06-09: roadmap created. 1/6 connectors done (calendar). H1 done. 5 connectors + H2/H3 remain.
+- 2026-06-09: operator connected **gmail, google_drive, google_sheets** (OAuth). Runtime
+  tools added so the intern can use them: `gmail_send` (COMM), `drive_read` + `sheets_read`
+  (CONr). Calendar has read+write. Gmail send needs the `gmail.send` scope on the connection.
+  Remaining tool gaps: gmail READ ingest, drive/sheets WRITE; connectors slack + notion (own OAuth).
