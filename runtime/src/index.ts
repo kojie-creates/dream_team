@@ -37,6 +37,7 @@ import {
 import { makeArtifactUploadFn } from './artifacts/upload.ts';
 import type { RunChildFn } from './tools/spawn.ts';
 import { toolsForRole } from './tools/registry.ts';
+import { systemForRole } from './prompts.ts';
 import type { SupabaseRpcClient } from './db/client.ts';
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -185,7 +186,10 @@ export async function startRun(input: StartRunInput, deps: StartRunDeps): Promis
       // parent's tools — a code-developer child gets write_file even though its
       // coordinator parent never holds it. Governance-faithful per-role surface.
       tools: toolsForRole(childInput.role),
-      system: `You are the ${childInput.role} specialist. ${childInput.brief} Complete it, then stop.`,
+      // Role-aware prompt: a dispatcher child delegates further via spawn; a
+      // specialist child executes. Inert under tape (system ignored); load-bearing
+      // for a live model driving the chain.
+      system: systemForRole(childInput.role, childInput.brief),
       messages: [{ role: 'user', content: childInput.brief }],
       maxTokens: input.maxTokens,
       spawn: { depth: childInput.depth, orchCount: childInput.orchCount, runChild },
